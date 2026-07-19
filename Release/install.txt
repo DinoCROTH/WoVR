@@ -1,0 +1,106 @@
+WoVR - WoW 3.3.5a VR Mod
+==========================
+
+Requirements:
+- Windows PC
+- SteamVR compatible VR headset (Quest, Vive, Index, etc.)
+- Quest users: Meta Quest Link must be active before launching
+- WoW 3.3.5a client (works with standard, 4GB patched, or lua unlocked executables)
+
+
+Installation:
+1. Close World of Warcraft if it is running.
+2. Copy "d3d9.dll" and "openvr_api.dll" into your WoW 3.3.5a game folder
+   (the same folder where Wow.exe is located).
+3. Copy the "vr" folder into your WoW 3.3.5a game folder.
+   The final structure should look like:
+
+   YourWoWFolder/
+     Wow.exe
+     d3d9.dll          <-- from this package
+     openvr_api.dll    <-- from this package
+     vr/
+       config.txt
+       actions.json
+       actions_touch.json
+       images/
+         cursors.png
+         keyboard_off.png
+         keyboard_on.png
+         occlusion_off.png
+         occlusion_on.png
+         swapgroup_off.png
+         swapgroup_on.png
+
+
+Launching:
+1. Start SteamVR.
+2. Launch Wow.exe normally.
+3. The game should start in VR mode automatically.
+
+
+Configuration (vr/config.txt):
+--- Rendering ---
+- uiOffsetScale    - Size of the floating UI panel (default 0.5)
+- uiOffsetZ        - Distance of UI from you (default -60, more negative = further)
+- uiOffsetY        - Vertical position of UI (default 0)
+- uiOffsetD        - UI depth offset (default -0.94055)
+- uiMultiplier     - UI render resolution/sharpness (default 3)
+- gameMultiplier   - Game world render resolution (default 2)
+
+--- Turning ---
+- snapRotateX      - Horizontal snap turn (0 = smooth, 1 = snap)
+- snapRotateY      - Vertical snap turn (0 = smooth, 1 = snap)
+- snapRotateAmountX - Snap turn degrees horizontal (default 45)
+- snapRotateAmountY - Snap turn degrees vertical (default 15)
+- smoothTurnSpeed  - Smooth turn speed (default 25, higher = slower)
+
+--- Movement ---
+- strafeMode       - Left stick 4-way strafe (1 = on, default, 0 = walk toward direction)
+- hmdOnward        - Onward-style locomotion bitmask (0 = off, 1 = HMD yaw, 2 = HMD yaw + controller palm pitch)
+
+--- Other ---
+- ipdOffset        - Manual IPD offset in mm (default 0)
+- flyingMountID    - Flying mount display ID (default 0)
+- groundMountID    - Ground mount display ID (default 0)
+- disableControllers - Disable VR controllers (0 = off)
+- showBodyFPS      - Show body/first-person toggle FPS display (0 = off)
+- OSK              - On-screen keyboard (1 = on, 0 = off, requires admin)
+
+Config changes take effect on next launch.
+To reset: delete config.txt and relaunch.
+
+
+Controls (default):
+- Left stick:       Movement (4-way strafe with strafeMode=1)
+- Right stick:      Camera rotation (smooth by default, snap if snapRotateX/Y=1)
+- Right stick down: Vertical look (snap or smooth)
+- Left trigger:     Zoom/scroll (over UI)
+- Right trigger:    Left click
+- Left bumper:      Shift modifier (for triggers)
+- A button:         Jump
+- B button:         Next target
+- X button:         Esc
+- Y button:         Map
+- Right stick click: Toggle first/third person
+- Left stick click:  Target nearest / random mount
+
+
+Fixes applied:
+- Fixed VR overlay images loading (copies from vr/images/)
+- Fixed DllMain crash (hooks no longer run during DLL initialization)
+- Fixed right-stick camera rotation speed (no longer rotates faster than character)
+- Fixed depth buffer sharing for proper stereo 3D
+- Enabled depth submission for Quest
+- Eliminated GPU readback for better performance
+- Added 4-way strafe mode for left stick
+- Added smooth turn speed configuration
+- Added manual IPD offset adjustment
+- Camera follows character facing when strafing
+
+
+Notes:
+- Play seated with VR motion controllers for best experience.
+- For support and updates, visit the Flat2VR Discord: https://flat2vr.com
+- Based on WoVR by ProjectMimer (github.com/ProjectMimer/WoVR)
+- Fork by belx-dev (github.com/belx-dev/WoVR)

@@ -2,7 +2,6 @@
 .vs/
 bin
 obj
-release
 debug
 packages
 openvr
