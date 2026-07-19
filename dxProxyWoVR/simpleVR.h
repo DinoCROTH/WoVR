@@ -69,4 +69,6 @@ public:
 	void MakeIPDOffset();
 	bool HasErrors();
 	std::string GetErrors();
+
+	float cfg_ipdOffset = 0.0f;
 };

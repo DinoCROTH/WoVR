@@ -188,6 +188,9 @@ float cfg_uiMultiplier = 3.0f;
 float cfg_gameMultiplier = 2.0f;
 bool cfg_disableControllers = false;
 bool cfg_showBodyFPS = false;
+float cfg_smoothTurnSpeed = 25.0f;
+bool cfg_strafeMode = true;
+float cfg_ipdOffset = 0.0f;
 inputController input = {}; //{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
 
 //----
@@ -457,6 +460,9 @@ void writeConfigFile()
         cfgFile << "gameMultiplier: " << cfg_gameMultiplier << std::endl;
         cfgFile << "disableControllers: " << cfg_disableControllers << std::endl;
         cfgFile << "showBodyFPS: " << cfg_showBodyFPS << std::endl;
+        cfgFile << "smoothTurnSpeed: " << cfg_smoothTurnSpeed << std::endl;
+        cfgFile << "strafeMode: " << cfg_strafeMode << std::endl;
+        cfgFile << "ipdOffset: " << cfg_ipdOffset << std::endl;
         cfgFile.close();
     }
     else
@@ -491,6 +497,9 @@ void readConfigFile()
     std::string s_cfg_gameMultiplier = "";
     std::string s_cfg_disableControllers = "";
     std::string s_cfg_showBodyFPS = "";
+    std::string s_cfg_smoothTurnSpeed = "";
+    std::string s_cfg_strafeMode = "";
+    std::string s_cfg_ipdOffset = "";
 
     cfgFile.open(g_CONFIG_FILE);
     if (cfgFile.is_open())
@@ -514,6 +523,9 @@ void readConfigFile()
         std::getline(cfgFile, s_cfg_gameMultiplier);
         std::getline(cfgFile, s_cfg_disableControllers);
         std::getline(cfgFile, s_cfg_showBodyFPS);
+        std::getline(cfgFile, s_cfg_smoothTurnSpeed);
+        std::getline(cfgFile, s_cfg_strafeMode);
+        std::getline(cfgFile, s_cfg_ipdOffset);
         cfgFile.close();
 
         //----
@@ -535,6 +547,9 @@ void readConfigFile()
         s_cfg_gameMultiplier.erase(0, s_cfg_gameMultiplier.find(": ") + 2);
         s_cfg_disableControllers.erase(0, s_cfg_disableControllers.find(": ") + 2);
         s_cfg_showBodyFPS.erase(0, s_cfg_showBodyFPS.find(": ") + 2);
+        s_cfg_smoothTurnSpeed.erase(0, s_cfg_smoothTurnSpeed.find(": ") + 2);
+        s_cfg_strafeMode.erase(0, s_cfg_strafeMode.find(": ") + 2);
+        s_cfg_ipdOffset.erase(0, s_cfg_ipdOffset.find(": ") + 2);
 
         //----
         // set the config options
@@ -555,8 +570,14 @@ void readConfigFile()
         cfg_gameMultiplier = std::stof(s_cfg_gameMultiplier);
         cfg_disableControllers = s_cfg_disableControllers != "0";
         cfg_showBodyFPS = s_cfg_showBodyFPS != "0";
+        cfg_smoothTurnSpeed = std::stof(s_cfg_smoothTurnSpeed);
+        cfg_strafeMode = s_cfg_strafeMode != "0";
+        cfg_ipdOffset = std::stof(s_cfg_ipdOffset);
         if (cfg_uiMultiplier < 0.1) cfg_uiMultiplier = 0.1;
         if (cfg_gameMultiplier < 0.1) cfg_gameMultiplier = 0.1;
+        if (cfg_smoothTurnSpeed < 1.0f) cfg_smoothTurnSpeed = 1.0f;
+        if (cfg_smoothTurnSpeed > 100.0f) cfg_smoothTurnSpeed = 100.0f;
+        svr->cfg_ipdOffset = cfg_ipdOffset;
 
         //hiddenTexture = (IDirect3DTexture9*)std::stol(s_cfg_groundMountID, NULL, 16);
     }
@@ -580,7 +601,7 @@ void CreateTextures(ID3D11Device* devDX11, IDirect3DDevice9* devDX9, POINT textu
 
         DepthBuffer11[i].SetWidthHeight(textureSize.x, textureSize.y);
         DepthBuffer11[i].textureDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        DepthBuffer11[i].textureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        DepthBuffer11[i].textureDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
         if(!DepthBuffer11[i].Create(devDX11, false, false, true, true))
             logError << DepthBuffer11[i].GetErrors();
         //logError << i << " DepthBuffer Shared " << DepthBuffer11[i].pSharedHandle << std::endl;
@@ -588,7 +609,7 @@ void CreateTextures(ID3D11Device* devDX11, IDirect3DDevice9* devDX9, POINT textu
         DepthBuffer[i].SetWidthHeight(textureSize.x, textureSize.y);
         DepthBuffer[i].pSharedHandle = DepthBuffer11[i].pSharedHandle;
         DepthBuffer[i].renderFormat = D3DFMT_D24X8;
-        if(!DepthBuffer[i].Create(devDX9, false, false, true, false))
+        if(!DepthBuffer[i].Create(devDX9, false, false, true, true))
             logError << DepthBuffer[i].GetErrors();
 
     }
@@ -1400,6 +1421,23 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
 {
     if (svr->isEnabled())
     {
+        svr->WaitGetPoses();
+        svr->SetFramePose();
+        svr->MakeIPDOffset();
+
+        matProjection[0] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 0)._m);
+        matProjection[1] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 1)._m);
+
+        matEyeOffset[0] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 0)._m);
+        matEyeOffset[1] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 1)._m);
+
+        matHMDPos = (XMMATRIX)(svr->GetFramePose(poseType::hmdPosition, -1)._m);
+        matController[0] = (XMMATRIX)(svr->GetFramePose(poseType::LeftHand, -1)._m);
+        matController[1] = (XMMATRIX)(svr->GetFramePose(poseType::RightHand, -1)._m);
+
+        matControllerPalm[0] = (XMMATRIX)(svr->GetFramePose(poseType::LeftHandPalm, -1)._m);
+        matControllerPalm[1] = (XMMATRIX)(svr->GetFramePose(poseType::RightHandPalm, -1)._m);
+
         HRESULT result = S_OK;
         D3DVIEWPORT9 hViewport, uViewport, mViewport;
         XMMATRIX identityMatrix = XMMatrixIdentity();
@@ -1805,21 +1843,6 @@ void(__fastcall msub_4A8720)()
             logError << svr->GetErrors();
 
         textureIndex = ((textureIndex + 1) % 3);
-        svr->WaitGetPoses();
-        svr->SetFramePose();
-
-        matProjection[0] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 0)._m);
-        matProjection[1] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 1)._m);
-
-        matEyeOffset[0] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 0)._m);
-        matEyeOffset[1] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 1)._m);
-
-        matHMDPos = (XMMATRIX)(svr->GetFramePose(poseType::hmdPosition, -1)._m);
-        matController[0] = (XMMATRIX)(svr->GetFramePose(poseType::LeftHand, -1)._m);
-        matController[1] = (XMMATRIX)(svr->GetFramePose(poseType::RightHand, -1)._m);
-
-        matControllerPalm[0] = (XMMATRIX)(svr->GetFramePose(poseType::LeftHandPalm, -1)._m);
-        matControllerPalm[1] = (XMMATRIX)(svr->GetFramePose(poseType::RightHandPalm, -1)._m);
 
         if (gPlayerObj && gPlayerObj->pModelContainer->p20Container->ptr20)
         {
@@ -2257,19 +2280,6 @@ void RunFrameUpdateController()
                     }
                     else if (curvedUIAtUI)
                     {
-                        POINT tmpPos = { it->intersection[i].point.vector4_f32[0] * maskWidth, it->intersection[i].point.vector4_f32[1] * maskHeight };
-                        RECT fromBox = { tmpPos.x, tmpPos.y, tmpPos.x + 1, tmpPos.y + 1 };
-                        result = devDX9->StretchRect(uiRenderMask.pShaderResource, &fromBox, uiRenderCheck.pShaderResource, NULL, D3DTEXF_NONE);
-                        result = devDX9->GetRenderTargetData(uiRenderCheck.pShaderResource, uiRenderCheckSystem.pShaderResource);
-
-                        D3DLOCKED_RECT lr;
-                        ZeroMemory(&lr, sizeof(D3DLOCKED_RECT));
-                        result = uiRenderCheckSystem.pShaderResource->LockRect(&lr, 0, D3DLOCK_READONLY);
-                        byte* pixel = (byte*)lr.pBits;
-                        result = uiRenderCheckSystem.pShaderResource->UnlockRect();
-
-                        if (pixel[0] == 0) // not over ui element
-                            isOverUIElement = false;
                     }
 
                     if (isOverUIElement && it->intersection[i].distance >= dist)
@@ -2362,8 +2372,6 @@ void (msub_796C10)(int a, int b, int c, int d, int e)
 
 void InitDetours(HANDLE hModule)
 {
-    //if (doLog) logError << "-- InitDetours Start" << std::endl;
-
     DetourTransactionBegin();
     DetourUpdateThread(GetCurrentThread());
 
@@ -2403,7 +2411,6 @@ void InitDetours(HANDLE hModule)
 
 void ExitDetours()
 {
-    //if (doLog) logError << "-- ExitDetours Start" << std::endl;
     /*
     logError << "s:" << cfg_uiOffsetScale << " : z:" << cfg_uiOffsetZ << " : y:" << cfg_uiOffsetY << " : d:" << cfg_uiOffsetD << std::endl;
 
@@ -2622,6 +2629,10 @@ void RunControllerGame()
         if (vr::VRInput()->GetAnalogActionData(input.game.movement, &analogActionData, sizeof(analogActionData), vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None && analogActionData.bActive == true) {
             static bool lyRunning = false;
             static bool lxRunning = false;
+            static bool mfRunning = false;
+            static bool mbRunning = false;
+            static bool mlRunning = false;
+            static bool mrRunning = false;
 
             /*if (bumperPressedL && bumperPressedR)
             {
@@ -2653,18 +2664,63 @@ void RunControllerGame()
                         if (hyp > 0.5f)
                             shouldRun = true;
 
-                        hRotationStickOffset = std::atan2(analogActionData.x * -1, analogActionData.y);
-                        if (lxRunning == false)
+                        if (cfg_strafeMode)
                         {
-                            lxRunning = true;
-                            moveForwardStart();
+                            float dz = 0.2f;
+                            if (std::fabs(analogActionData.y) > std::fabs(analogActionData.x))
+                            {
+                                bool fwd = analogActionData.y > dz;
+                                bool back = analogActionData.y < -dz;
+
+                                if (fwd && !mfRunning) { mfRunning = true; moveForwardStart(); }
+                                else if (!fwd && mfRunning) { mfRunning = false; moveForwardStop(); }
+
+                                if (back && !mbRunning) { mbRunning = true; moveBackwardStart(); }
+                                else if (!back && mbRunning) { mbRunning = false; moveBackwardStop(); }
+
+                                if (mlRunning) { mlRunning = false; moveLeftStop(); }
+                                if (mrRunning) { mrRunning = false; moveRightStop(); }
+                            }
+                            else
+                            {
+                                bool left = analogActionData.x < -dz;
+                                bool right = analogActionData.x > dz;
+
+                                if (left && !mlRunning) { mlRunning = true; moveLeftStart(); }
+                                else if (!left && mlRunning) { mlRunning = false; moveLeftStop(); }
+
+                                if (right && !mrRunning) { mrRunning = true; moveRightStart(); }
+                                else if (!right && mrRunning) { mrRunning = false; moveRightStop(); }
+
+                                if (mfRunning) { mfRunning = false; moveForwardStop(); }
+                                if (mbRunning) { mbRunning = false; moveBackwardStop(); }
+                            }
+                        }
+                        else
+                        {
+                            hRotationStickOffset = std::atan2(analogActionData.x * -1, analogActionData.y);
+                            if (lxRunning == false)
+                            {
+                                lxRunning = true;
+                                moveForwardStart();
+                            }
                         }
 
                     }
-                    else if (hyp <= 0.1f && lxRunning == true)
+                    else if (hyp <= 0.1f)
                     {
-                        lxRunning = false;
-                        moveForwardStop();
+                        if (cfg_strafeMode)
+                        {
+                            if (mfRunning) { mfRunning = false; moveForwardStop(); }
+                            if (mbRunning) { mbRunning = false; moveBackwardStop(); }
+                            if (mlRunning) { mlRunning = false; moveLeftStop(); }
+                            if (mrRunning) { mrRunning = false; moveRightStop(); }
+                        }
+                        else if (lxRunning == true)
+                        {
+                            lxRunning = false;
+                            moveForwardStop();
+                        }
                     }
                 }
             }
@@ -2694,7 +2750,7 @@ void RunControllerGame()
                     if (std::fabs(analogActionData.x) > 0.2f)
                     {
                         rightStickActive = true;
-                        hRotationOffset = (analogActionData.x / -25.0f);
+                        hRotationOffset = (analogActionData.x / -cfg_smoothTurnSpeed);
                     }
 
                 if (bumperPressedL)
@@ -2757,7 +2813,7 @@ void RunControllerGame()
                     }
                     else
                         if (std::fabs(analogActionData.y) > 0.2f)
-                            vRotationOffset = (analogActionData.y / 25.0f);
+                            vRotationOffset = (analogActionData.y / cfg_smoothTurnSpeed);
                 }
             }
         }
@@ -3177,6 +3233,9 @@ void RunControllerGame()
             gRotation = EnsureProperRadians(gRotation - onwardDiff);
             oldOnwardYaw = angles.vector4_f32[1];
         }
+
+        if (cfg_strafeMode && leftStickActive)
+            gCamRotation = gRotation;
 
 
         if (std::fabs(targetFacing) > 0)

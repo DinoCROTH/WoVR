@@ -35,21 +35,20 @@ void simpleVR::InitalizeVR()
 	memcpy(&controllerMatrix[2], identMatrix._m, sizeof(uMatrix));
 	memcpy(&controllerMatrix[3], identMatrix._m, sizeof(uMatrix));
 
-	//layoutFinger[0] = fingerHandLayout();
-	//layoutFinger[1] = fingerHandLayout();
+	depthRange.v[0] = 0.06f;
+	depthRange.v[1] = 1000.0f;
 }
 
 bool simpleVR::PreloadVR()
 {
 	if (!vr::VR_IsHmdPresent())
 	{
-		//InitalizeVR();
 		_isConnected = false;
 		return _isConnected;
 	}
 
 	vr::EVRInitError eError = vr::VRInitError_None;
-	vr::IVRSystem* localVRSession = vr::VR_Init(&eError, vr::VRApplication_Scene);
+	openVRSession = vr::VR_Init(&eError, vr::VRApplication_Scene);
 
 	//----
 	// Gets the buffer and resolution sizes
@@ -64,15 +63,14 @@ bool simpleVR::PreloadVR()
 	resolution.x = rWidth;
 	resolution.y = rHeight;
 
-	localVRSession->GetRecommendedRenderTargetSize(&rWidth, &rHeight);
+	openVRSession->GetRecommendedRenderTargetSize(&rWidth, &rHeight);
 	bufferSize.x = rWidth;
 	bufferSize.y = rHeight;
 
 	if (printLogs)
 		logError << "Getting Buffers " << bufferSize.x << "x" << bufferSize.y << std::endl;
 
-	vr::VR_Shutdown();
-	localVRSession = nullptr;
+	return true;
 }
 
 void simpleVR::SetProjection(vr::HmdVector2_t depth)
@@ -185,17 +183,19 @@ bool simpleVR::StartVR()
 {
 	if (!vr::VR_IsHmdPresent())
 	{
-		//InitalizeVR();
 		_isConnected = false;
 		return _isConnected;
 	}
 	
 	if (_isConnected == false)
 	{
-		vr::EVRInitError eError = vr::VRInitError_None;
-		openVRSession = vr::VR_Init(&eError, vr::VRApplication_Scene);
+		if (!openVRSession)
+		{
+			vr::EVRInitError eError = vr::VRInitError_None;
+			openVRSession = vr::VR_Init(&eError, vr::VRApplication_Scene);
+		}
 		openVRChaperone = vr::VRChaperone();
-		openVRModels = (vr::IVRRenderModels*)vr::VR_GetGenericInterface(vr::IVRRenderModels_Version, &eError);
+		openVRModels = (vr::IVRRenderModels*)vr::VR_GetGenericInterface(vr::IVRRenderModels_Version, NULL);
 		vr::VRCompositor()->SetTrackingSpace(vr::TrackingUniverseSeated);
 
 		textureBounds[0] = vr::VRTextureBounds_t();
@@ -480,28 +480,6 @@ void simpleVR::Render(ID3D11Texture2D* leftEye, ID3D11Texture2D* leftDepth, ID3D
 {
 	if (openVRSession && _isConnected)
 	{
-		float colorA[] = { 0, 1, 0, 1 };
-
-		vr::Texture_t completeTexture[] = {
-					{ leftEye, vr::TextureType_DirectX, vr::ColorSpace_Gamma },
-					{ rightEye, vr::TextureType_DirectX, vr::ColorSpace_Gamma },
-		};
-
-		/*
-		typedef struct VRTextureWithDepth_t
-		{
-			void* handle; // void *
-			enum ETextureType eType;
-			enum EColorSpace eColorSpace;
-			void* depth.handle; // void *
-			struct HmdMatrix44_t depth.mProjection;
-			struct HmdVector2_t depth.vRange;
-		} VRTextureWithDepth_t;
-		*/
-		/*
-		depthRange.v[0] = 0.0f;
-		depthRange.v[1] = 1.0f;
-
 		vr::HmdMatrix44_t projMat[2];
 		projMat[0].m[0][0] = projMatrixRaw[0].matrix[0][0];
 		projMat[0].m[0][1] = projMatrixRaw[0].matrix[1][0];
@@ -554,28 +532,17 @@ void simpleVR::Render(ID3D11Texture2D* leftEye, ID3D11Texture2D* leftDepth, ID3D
 		completeDepth[1].eType = vr::TextureType_DirectX;
 		completeDepth[1].eColorSpace = vr::ColorSpace_Gamma;
 		completeDepth[1].depth = { rightDepth, projMat[1], depthRange };
-		*/
-		vr::VRTextureBounds_t _bound = { 0.0f, 0.0f,  1.0f, 1.0f };
 
-		//textureBounds[0] = { 0.0f, 0.0f, 0.5f, 1.0f };
-		//textureBounds[1] = { 0.5f, 0.0f, 1.0f, 1.0f };
-
-		//WaitGetPoses();
-		
 		vr::EVRCompositorError error = vr::VRCompositorError_None;
-		error = vr::VRCompositor()->Submit(vr::Eye_Left, &completeTexture[0], &textureBounds[0], vr::Submit_Default);
-		//error = vr::VRCompositor()->Submit(vr::Eye_Left, &completeDepth[0], &textureBounds[0], vr::Submit_TextureWithDepth);
-		if (error && printLogs) {
-			logError << "SimpleVR VRCompositor Error: " << std::hex << error << std::endl;
+		error = vr::VRCompositor()->Submit(vr::Eye_Left, (vr::Texture_t*)&completeDepth[0], &textureBounds[0], vr::Submit_TextureWithDepth);
+		if (error) {
+			logError << "SimpleVR VRCompositor Error (L): " << std::hex << error << std::endl;
 		}
 
-		error = vr::VRCompositor()->Submit(vr::Eye_Right, &completeTexture[1], &textureBounds[1], vr::Submit_Default);
-		//error = vr::VRCompositor()->Submit(vr::Eye_Right, &completeDepth[1], &textureBounds[1], vr::Submit_TextureWithDepth);
-		if (error && printLogs) {
-			logError << "SimpleVR VRCompositor Error: " << std::hex << error << std::endl;
+		error = vr::VRCompositor()->Submit(vr::Eye_Right, (vr::Texture_t*)&completeDepth[1], &textureBounds[1], vr::Submit_TextureWithDepth);
+		if (error) {
+			logError << "SimpleVR VRCompositor Error (R): " << std::hex << error << std::endl;
 		}
-		
-		//WaitGetPoses();
 	}
 }
 
@@ -590,8 +557,8 @@ void simpleVR::MakeIPDOffset()
 	memcpy(&eyeViewMatrix[0], &eyeViewMatrixRaw[0], sizeof(uMatrix));
 	memcpy(&eyeViewMatrix[1], &eyeViewMatrixRaw[1], sizeof(uMatrix));
 
-	//eyeViewMatrix[0]._m[12] += -(cfg->ipdOffset / 1000);
-	//eyeViewMatrix[1]._m[12] += +(cfg->ipdOffset / 1000);
+	eyeViewMatrix[0]._m[12] += -(cfg_ipdOffset / 1000.0f);
+	eyeViewMatrix[1]._m[12] += +(cfg_ipdOffset / 1000.0f);
 }
 
 bool simpleVR::HasErrors()

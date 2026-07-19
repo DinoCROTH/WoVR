@@ -6,6 +6,48 @@ Full credit goes to ProjectMimer for their original work.
 
 
 
+## Installation
+
+### Requirements
+- Windows 10/11
+- SteamVR installed via Steam
+- A SteamVR-compatible VR headset
+- World of Warcraft 3.3.5a client
+
+### Install Steps
+1. Build the project (see Building below), or download the latest `d3d9.dll` release.
+2. Copy `d3d9.dll` into your WoW 3.3.5a game folder, next to `Wow.exe`.
+3. The `openvr_api.dll` is required at runtime. It ships with SteamVR and is loaded automatically from the SteamVR installation path.
+4. Create a `vr` folder inside your WoW game directory (e.g. `World of Warcraft 3.3.5a/vr/`).
+5. Copy `config/actions.json` and `config/actions_touch.json` into that `vr` folder.
+6. Launch SteamVR, then launch WoW normally. The game should detect the VR headset and start in VR mode.
+
+### Configuration
+VR settings can be tuned by editing the `config.txt` file inside the `vr` folder. Key options include:
+- Snap turn degrees (horizontal and vertical)
+- Specific ground and flying mounts for the random mount button (Left Stick Click)
+
+## Building from Source
+
+### Requirements
+- Visual Studio Build Tools with MSVC v145 toolset (VS 2026) or later
+- Windows 10 SDK (10.0.26100 or later)
+
+### Build Steps
+1. Clone the repository:
+   ```
+   git clone https://github.com/belx-dev/WoVR
+   ```
+2. Download the OpenVR SDK headers and library and place them in the `openvr/` folder:
+   - `openvr/headers/openvr.h`
+   - `openvr/lib/win32/openvr_api.lib`
+3. Restore NuGet packages (Detours 4.0.1) or download manually into `packages/Detours.4.0.1/`.
+4. Open `dxProxyWoVR.sln` in Visual Studio and build the Release|Win32 configuration, or build from the command line:
+   ```
+   MSBuild dxProxyWoVR.sln /p:Configuration=Release /p:Platform=x86
+   ```
+5. The output `d3d9.dll` will be placed in the `Release/` folder.
+
 ## Original Readme
 
 WoVR aims to add VR support to 3.3.5a the last patch of the second expansion of the highly successful MMO initially launched in 2004.
