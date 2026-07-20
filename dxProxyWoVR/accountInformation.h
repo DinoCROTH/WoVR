@@ -137,7 +137,7 @@ struct accountInformation
         AccountNames[accountName] = serverInformation();
         AccountNames[accountName].path = path;
         AccountNames[accountName].name = accountName;
-        path = path;
+        this->path = path;
     }
 
     void Add(std::string accountName, std::string serverName, std::string path)

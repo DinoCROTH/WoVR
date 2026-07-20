@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 
 #undef UNICODE
 #define WIN32_LEAN_AND_MEAN

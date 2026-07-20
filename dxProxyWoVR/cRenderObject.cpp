@@ -36,11 +36,6 @@ bool RenderObject::SetVertexBuffer(std::vector<float> vertices, int itmStride, b
 	return vertexSet;
 }
 
-int RenderObject::GetVertexCount()
-{
-	return vertexCount;
-}
-
 bool RenderObject::SetIndexBuffer(std::vector<short> indices, bool ignoreCreateBuffer, D3DPOOL usage)
 {
 	indexList = indices;

@@ -15,7 +15,6 @@ extern std::stringstream logError;
 
 #define M_PI		3.14159265358979323846f
 float Deg2Rad = M_PI / 180.0f;
-float Rad2Deg = 180.0f / M_PI;
 
 const std::string g_VR_PATH = "./vr/";
 const std::string g_CONFIG_FILE = g_VR_PATH + "config.txt";
@@ -43,8 +42,6 @@ stBasicTexture9 DepthBuffer[6] = { stBasicTexture9(), stBasicTexture9(), stBasic
 
 stBasicTexture9 uiRender = stBasicTexture9();
 stBasicTexture9 uiRenderMask = stBasicTexture9();
-stBasicTexture9 uiRenderCheck = stBasicTexture9();
-stBasicTexture9 uiRenderCheckSystem = stBasicTexture9();
 stBasicTexture9 uiDepth = stBasicTexture9();
 stBasicTexture9 cursor = stBasicTexture9();
 
@@ -67,7 +64,6 @@ bool oldOSK = true;
 bool isRunningAsAdmin = false;
 bool defaultCutupResolution = false;
 bool isPossessing = false;
-std::stringstream outStream;
 
 stBasicTexture9 handWatchList[] = {
     stBasicTexture9(), stBasicTexture9(),
@@ -122,9 +118,7 @@ DWORD origDepthBuffer = 0;
 DWORD curBackBufferLoc = 0;
 IDirect3DSurface9* mainBackBuffer = nullptr;
 
-bool printRoute = false;
 bool isOverUI = false;
-int indent = 0;
 POINT wtfSize = { 0, 0 };
 
 ShaderData vsTexture = VertexShaderTexture();
@@ -167,8 +161,6 @@ XMMATRIX after = {
         -1, 0, 0, 0,
          0, 0, 0, 1,
 };
-IDirect3DTexture9* hiddenTexture;
-
 //----
 // Config settings
 //----
@@ -578,8 +570,6 @@ void readConfigFile()
         if (cfg_smoothTurnSpeed < 1.0f) cfg_smoothTurnSpeed = 1.0f;
         if (cfg_smoothTurnSpeed > 100.0f) cfg_smoothTurnSpeed = 100.0f;
         svr->cfg_ipdOffset = cfg_ipdOffset;
-
-        //hiddenTexture = (IDirect3DTexture9*)std::stol(s_cfg_groundMountID, NULL, 16);
     }
 }
 
@@ -621,18 +611,6 @@ void CreateTextures(ID3D11Device* devDX11, IDirect3DDevice9* devDX9, POINT textu
     uiRenderMask.SetWidthHeight(textureSizeUI.x / 4, textureSizeUI.y / 4);
     if (!uiRenderMask.Create(devDX9, false, true, false, false))
         logError << uiRenderMask.GetErrors();
-
-    uiRenderCheck.SetWidthHeight(1, 1);
-    if (!uiRenderCheck.Create(devDX9, false, true, false, false))
-        logError << uiRenderCheck.GetErrors();
-
-    //----
-    // Requires SystemMem
-    //----
-    uiRenderCheckSystem.creationType = 1;
-    result = devDX9->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &uiRenderCheckSystem.pTexture, NULL);
-    if (SUCCEEDED(result))
-        uiRenderCheckSystem.CreateShaderResourceView(devDX9);
 
 
     uiDepth.SetWidthHeight(textureSizeUI.x, textureSizeUI.y);
@@ -679,8 +657,6 @@ void DestroyTextures()
     cursor.Release();
 
     uiDepth.Release();
-    uiRenderCheckSystem.Release();
-    uiRenderCheck.Release();
     uiRenderMask.Release();
     uiRender.Release();
 
@@ -1209,8 +1185,6 @@ void msub_6A2040_post(void* ecx, bool* retVal)
             // nop delete epic code
             mem.writeMemoryL(0x97044C, 1, 0x90);
             mem.writeMemoryL(0x97044D, 1, 0x90);
-
-            DWORD overrideLocation = 0x0082FDF6;
         }
         mem.closeProcess();
 
@@ -1889,13 +1863,6 @@ void(__fastcall msub_4A8720)()
         //devDX9->StretchRect(uiRender.pShaderResource, NULL, pBackBuffer, NULL, D3DTEXF_NONE);
         devDX9->StretchRect(BackBuffer[0].pShaderResource, NULL, pBackBuffer, NULL, D3DTEXF_NONE);
 
-        if (hiddenTexture)
-        {
-            IDirect3DSurface9* hiddenSurface = nullptr;
-            hiddenTexture->GetSurfaceLevel(0, &hiddenSurface);
-            devDX9->StretchRect(hiddenSurface, NULL, pBackBuffer, NULL, D3DTEXF_NONE);
-            hiddenSurface->Release();
-        }
         pBackBuffer->Release();
     }
     else
@@ -2357,7 +2324,6 @@ void(__thiscall* sub_6A38D0)(void*) = (void(__thiscall*)(void*))0x006A38D0;
 void(__fastcall msub_6A38D0)(void* ecx, void* edx)
 {
     static bool show = false;
-    static bool doSBS = false;
     if (show) {
         sub_6A38D0(ecx);
     }
@@ -2913,7 +2879,6 @@ void RunControllerGame()
 
         if (vr::VRInput()->GetAnalogActionData(input.game.right_trigger, &analogActionData, sizeof(analogActionData), vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None && analogActionData.bActive == true)
         {
-            int var = 0;
             if (bumperPressedR)
             {
                 if (mouseButtonDownL)
@@ -3138,36 +3103,6 @@ void RunControllerGame()
                     setKeyDown((unsigned int)VK_ESCAPE);
                 else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                     setKeyUp((unsigned int)VK_ESCAPE);
-            }
-        }
-
-        if (vr::VRInput()->GetDigitalActionData(input.game.menu_select, &digitalActionData, sizeof(digitalActionData), vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None && digitalActionData.bActive == true)
-        {
-            if (gPlayerObj)
-            {
-                if (bumperPressed)
-                {
-
-                }
-                else
-                {
-
-                }
-            }
-        }
-
-        if (vr::VRInput()->GetDigitalActionData(input.game.menu_start, &digitalActionData, sizeof(digitalActionData), vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None && digitalActionData.bActive == true)
-        {
-            if (gPlayerObj)
-            {
-                if (bumperPressed)
-                {
-
-                }
-                else
-                {
-
-                }
             }
         }
 

@@ -138,7 +138,6 @@
     <ClCompile Include="PixelShaderTexture.cpp" />
     <ClCompile Include="PixelShaderWithMouseDot.cpp" />
     <ClCompile Include="proxydll.cpp" />
-    <ClCompile Include="RenderCube.cpp" />
     <ClCompile Include="RenderCurvedUI.cpp" />
     <ClCompile Include="RenderMaskUI.cpp" />
     <ClCompile Include="RenderOSK.cpp" />

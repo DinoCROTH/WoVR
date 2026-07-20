@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 #include <D3D9.h>
 #include <DirectXMath.h>
 #include <iostream>
@@ -49,7 +48,6 @@ public:
 	RenderObject(IDirect3DDevice9* tdev);
 
 	bool SetVertexBuffer(std::vector<float> vertices, int itmStride, bool ignoreCreateBuffer = false, D3DPOOL usage = D3DPOOL_DEFAULT);
-	int GetVertexCount();
 	bool SetIndexBuffer(std::vector<short> indices, bool ignoreCreateBuffer = false, D3DPOOL usage = D3DPOOL_DEFAULT);
 	void SetShadersLayout(IDirect3DVertexDeclaration9* layout, IDirect3DVertexShader9* vertex, IDirect3DPixelShader9* pixel);
 	void MapResourceVertex(void* data, int size);
@@ -97,13 +95,6 @@ class RenderMaskUI : public RenderObject
 
 public:
 	RenderMaskUI(IDirect3DDevice9* tdev);
-};
-
-class RenderCube : public RenderObject
-{
-
-public:
-	RenderCube(IDirect3DDevice9* tdev);
 };
 
 class RenderRayLine : public RenderObject

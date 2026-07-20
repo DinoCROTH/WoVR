@@ -6,3 +6,12 @@ debug
 packages
 openvr
 sym_openvr.bat
+*.obj
+*.pdb
+*.iobj
+*.ipdb
+*.exp
+*.tlog
+*.lastbuildstate
+*.recipe
+dxProxyWoVR/Release/

@@ -60,8 +60,6 @@ bool simpleVR::PreloadVR()
 
 	vr::IVRExtendedDisplay* d = vr::VRExtendedDisplay();
 	d->GetWindowBounds(&rX, &rY, &rWidth, &rHeight);
-	resolution.x = rWidth;
-	resolution.y = rHeight;
 
 	openVRSession->GetRecommendedRenderTargetSize(&rWidth, &rHeight);
 	bufferSize.x = rWidth;
@@ -151,7 +149,6 @@ void simpleVR::SetProjection(vr::HmdVector2_t depth)
 			textureBounds[1].vMin = 0.5f - 0.5f * rBottom / yTanHaflFOV;
 			textureBounds[1].vMax = 0.5f - 0.5f * rTop / yTanHaflFOV;
 
-			float Rad2Deg = 180.0f / (float)M_PI;
 			float aspect = xTanHaflFOV / yTanHaflFOV;
 			float oneOverDepth = 1 / (depthRange.v[1] - depthRange.v[0]);
 
@@ -233,16 +230,9 @@ bool simpleVR::StartVR()
 		memcpy(&eyeViewMatrix[1], &eyeViewMatrixRaw[1], sizeof(uMatrix));
 
 
-		
-		if (asymmetricProjection)
-		{
-		}
-		else
-		{
-			// Grow the recommended size to account for the overlapping fov
-			bufferSize.x = (long)(bufferSize.x / std::fmax(textureBounds[0].uMax - textureBounds[0].uMin, textureBounds[1].uMax - textureBounds[1].uMin));
-			bufferSize.y = (long)(bufferSize.y / std::fmax(textureBounds[0].vMax - textureBounds[0].vMin, textureBounds[1].vMax - textureBounds[1].vMin));
-		}
+		// Grow the recommended size to account for the overlapping fov
+		bufferSize.x = (long)(bufferSize.x / std::fmax(textureBounds[0].uMax - textureBounds[0].uMin, textureBounds[1].uMax - textureBounds[1].uMin));
+		bufferSize.y = (long)(bufferSize.y / std::fmax(textureBounds[0].vMax - textureBounds[0].vMin, textureBounds[1].vMax - textureBounds[1].vMin));
 		
 		_isConnected = true;
 	}
@@ -296,9 +286,6 @@ void simpleVR::SetFramePose()
 		vr::VRCompositor()->GetLastPoses(rTrackedDevicePose, vr::k_unMaxTrackedDeviceCount, NULL, 0);
 
 		vr::TrackedDevicePose_t hmdPose = vr::TrackedDevicePose_t();
-		vr::TrackedDevicePose_t controllerPose[2] = { 0, 0 };
-		vr::TrackedDevicePose_t GenericTracker[3] = { 0, 0, 0 };
-		int gTrackIndex = 0;
 
 		//----
 		// Loops though all (MaxDeviceCount(16)) available positions
@@ -323,27 +310,6 @@ void simpleVR::SetFramePose()
 						// Get the pose of the controllers
 						//----
 					}
-					else if (classType == vr::TrackedDeviceClass_Controller) {
-						//----
-						// Check and see if we are dealing with the left or right controller
-						//----
-						//vr::VRControllerState_t controllerState;
-						//openVRSession->GetControllerState(i, &controllerState, sizeof(vr::VRControllerState_t));
-
-						vr::ETrackedControllerRole controllerRole = openVRSession->GetControllerRoleForTrackedDeviceIndex(i);
-						if (controllerRole == vr::TrackedControllerRole_LeftHand) {
-							controllerPose[0] = rTrackedDevicePose[i];
-						}
-						else if (controllerRole == vr::TrackedControllerRole_RightHand) {
-							controllerPose[1] = rTrackedDevicePose[i];
-						}
-					}
-					else if (classType == vr::TrackedDeviceClass_GenericTracker) {
-						if (gTrackIndex < gTrackCount) {
-							GenericTracker[gTrackIndex] = rTrackedDevicePose[i];
-							gTrackIndex++;
-						}
-					}
 				}
 			}
 		}
@@ -366,34 +332,6 @@ void simpleVR::SetFramePose()
 		{
 			memcpy(hmdMatrix.matrix, identMatrix.matrix, sizeof(float) * 4 * 4);
 		}
-
-		//----
-		// Convert the Left Controller Pose into 4x4 Matrix
-		//----
-		if (controllerPose[0].bPoseIsValid) {
-			matPose = controllerPose[0].mDeviceToAbsoluteTracking;
-			float poseMatrix[] = {
-				matPose.m[0][0], matPose.m[1][0], matPose.m[2][0], 0.0f,
-				matPose.m[0][1], matPose.m[1][1], matPose.m[2][1], 0.0f,
-				matPose.m[0][2], matPose.m[1][2], matPose.m[2][2], 0.0f,
-				matPose.m[0][3], matPose.m[1][3], matPose.m[2][3], 1.0f
-			};
-			//memcpy(controllerLeftMatrix.matrix, poseMatrix, sizeof(float) * 4 * 4);
-		}
-
-		//----
-		// Convert the Right Controller Pose into 4x4 Matrix
-		//----
-		if (controllerPose[1].bPoseIsValid) {
-			matPose = controllerPose[1].mDeviceToAbsoluteTracking;
-			float poseMatrix[] = {
-				matPose.m[0][0], matPose.m[1][0], matPose.m[2][0], 0.0f,
-				matPose.m[0][1], matPose.m[1][1], matPose.m[2][1], 0.0f,
-				matPose.m[0][2], matPose.m[1][2], matPose.m[2][2], 0.0f,
-				matPose.m[0][3], matPose.m[1][3], matPose.m[2][3], 1.0f
-			};
-			//memcpy(controllerRightMatrix.matrix, poseMatrix, sizeof(float) * 4 * 4);
-		}
 	}
 }
 
@@ -415,66 +353,28 @@ void simpleVR::SetActionPose(vr::HmdMatrix34_t matPose, poseType poseType)
 		memcpy(controllerMatrix[3].matrix, poseMatrix, sizeof(float) * 4 * 4);
 }
 
-void simpleVR::SetSkeletalPose(vr::VRBoneTransform_t* boneArray, int boneCount, poseType poseType)
-{
-	if (poseType == poseType::LeftHand && boneCount == 31)
-	{
-		for (int i = 0; i < boneCount; i++)
-		{
-			//layoutFinger[0].data[i].Translation = Vector4(boneArray[i].position.v[0], boneArray[i].position.v[1], boneArray[i].position.v[2], boneArray[i].position.v[3]);
-			//layoutFinger[0].data[i].Rotation = Quat4(boneArray[i].orientation.w, boneArray[i].orientation.x, boneArray[i].orientation.y, boneArray[i].orientation.z);
-			//layoutFinger[0].data[i].Scale = Vector4(1, 1, 1, 1);
-		}
-	}
-	else if (poseType == poseType::RightHand && boneCount == 31)
-	{
-		for (int i = 0; i < boneCount; i++)
-		{
-			//layoutFinger[1].data[i].Translation = Vector4(boneArray[i].position.v[0], boneArray[i].position.v[1], boneArray[i].position.v[2], boneArray[i].position.v[3]);
-			//layoutFinger[1].data[i].Rotation = Quat4(boneArray[i].orientation.w, boneArray[i].orientation.x, boneArray[i].orientation.y, boneArray[i].orientation.z);
-			//layoutFinger[1].data[i].Scale = Vector4(1, 1, 1, 1);
-		}
-	}
-}
-
 uMatrix simpleVR::GetFramePose(poseType poseType, int eye)
 {
 	switch (poseType)
 	{
 	case poseType::Projection:
 		return projMatrixRaw[eye];
-		break;
 	case poseType::EyeOffset:
 		return eyeViewMatrix[eye];
-		break;
 	case poseType::hmdPosition:
 		return hmdMatrix;
-		break;
 	case poseType::LeftHand:
 		return controllerMatrix[0];
-		break;
 	case poseType::LeftHandPalm:
 		return controllerMatrix[1];
-		break;
 	case poseType::RightHand:
 		return controllerMatrix[2];
-		break;
 	case poseType::RightHandPalm:
 		return controllerMatrix[3];
-		break;
 	default:
 		return identMatrix;
-		break;
 	}
 }
-/*
-fingerHandLayout simpleVR::GetSkeletalPose(poseType poseType)
-{
-	if (poseType == poseType::LeftHand)
-		return layoutFinger[0];
-	else if (poseType == poseType::RightHand)
-		return layoutFinger[1];
-}*/
 
 void simpleVR::Render(ID3D11Texture2D* leftEye, ID3D11Texture2D* leftDepth, ID3D11Texture2D* rightEye, ID3D11Texture2D* rightDepth)
 {
