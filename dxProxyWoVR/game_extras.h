@@ -5,7 +5,6 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <DirectXMath.h>
-#include <list>
 #include <iostream>
 #include <fstream>
 

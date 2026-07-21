@@ -109,6 +109,8 @@ HRESULT __stdcall cIDirect3D9::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType,
 {
 	extern cIDirect3DDevice9* glIDirect3DDevice9;
 
+	pPresentationParameters->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+
 	D3DDISPLAYMODEEX displayMode;
 	displayMode.Size = sizeof(D3DDISPLAYMODEEX);
 	displayMode.Format = pPresentationParameters->BackBufferFormat;
@@ -169,6 +171,8 @@ HRESULT __stdcall cIDirect3D9::GetAdapterDisplayModeEx(UINT Adapter, D3DDISPLAYM
 HRESULT __stdcall cIDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface)
 {
 	extern cIDirect3DDevice9Ex* glIDirect3DDevice9Ex;
+
+	pPresentationParameters->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 
 	IDirect3DDevice9Ex* ppReturnedDeviceInterfaceRetEx = NULL;
 	HRESULT hRet = m_pIDirect3D9->CreateDeviceEx(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, pFullscreenDisplayMode, &ppReturnedDeviceInterfaceRetEx);

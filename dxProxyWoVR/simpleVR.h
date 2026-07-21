@@ -19,6 +19,7 @@ class simpleVR
 	vr::IVRChaperone* openVRChaperone = nullptr;
 	vr::IVRRenderModels* openVRModels = nullptr;
 	vr::TrackedDevicePose_t rTrackedDevicePose[vr::k_unMaxTrackedDeviceCount];
+	vr::ETrackedDeviceClass rDeviceClass[vr::k_unMaxTrackedDeviceCount];
 	bool _isConnected = false;
 	POINT bufferSize;
 	uMatrix projMatrixRaw[2];
@@ -41,6 +42,7 @@ private:
 	uint32_t m_startFramePresents = 0;
 	uint32_t m_reprojectionCount = 0;
 	bool m_perfLogStarted = false;
+	bool m_hasErrors = false;
 	void UpdatePerfLogging();
 
 public:

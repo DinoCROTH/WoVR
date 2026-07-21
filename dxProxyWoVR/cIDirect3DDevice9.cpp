@@ -108,6 +108,7 @@ UINT cIDirect3DDevice9::GetNumberOfSwapChains()
 
 HRESULT cIDirect3DDevice9::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
+	pPresentationParameters->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 	return m_pIDirect3DDevice9->Reset(pPresentationParameters);
 }
 
@@ -756,6 +757,7 @@ UINT cIDirect3DDevice9Ex::GetNumberOfSwapChains()
 
 HRESULT cIDirect3DDevice9Ex::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
+	pPresentationParameters->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 	return m_pIDirect3DDevice9Ex->Reset(pPresentationParameters);
 }
 

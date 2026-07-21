@@ -31,11 +31,11 @@ stScreenLayout screenLayout = stScreenLayout();
 POINT hmdBufferSize = { 0, 0 };
 POINT uiBufferSize = { 0, 0 };
 
-stBasicTexture BackBuffer11[6] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
-stBasicTexture DepthBuffer11[6] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
+stBasicTexture BackBuffer11[8] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
+stBasicTexture DepthBuffer11[8] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
 
-stBasicTexture9 BackBuffer[6] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
-stBasicTexture9 DepthBuffer[6] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
+stBasicTexture9 BackBuffer[8] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
+stBasicTexture9 DepthBuffer[8] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
 
 //stBasicTexture9 mainRenderBuffer = stBasicTexture9();
 //stBasicTexture9 mainDepthBuffer = stBasicTexture9();
@@ -141,6 +141,7 @@ RenderObject handWatchSquare[3] = { nullptr, nullptr, nullptr };
 
 
 XMMATRIX matProjection[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
+XMMATRIX matProjectionNeg[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
 XMMATRIX matEyeOffset[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
 XMMATRIX matHMDPos = XMMatrixIdentity();
 XMMATRIX matController[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
@@ -165,10 +166,10 @@ XMMATRIX after = {
 // Config settings
 //----
 bool cfg_OSK = true;
-bool cfg_snapRotateX = false;
+bool cfg_snapRotateX = true;
 bool cfg_snapRotateY = true;
-float cfg_snapRotateAmountX = 45.0f;
-float cfg_snapRotateAmountY = 15.0f;
+float cfg_snapRotateAmountX = 30.0f;
+float cfg_snapRotateAmountY = 30.0f;
 float cfg_uiOffsetScale = 0.5f;
 float cfg_uiOffsetZ = -60.0f;
 float cfg_uiOffsetY = 0.0;
@@ -176,13 +177,14 @@ float cfg_uiOffsetD = -0.94055f;
 int cfg_flyingMountID = 0;
 int cfg_groundMountID = 0;
 int cfg_hmdOnward = 0;
-float cfg_uiMultiplier = 3.0f;
-float cfg_gameMultiplier = 2.0f;
+float cfg_uiMultiplier = 1.0f;
+float cfg_gameMultiplier = 1.0f;
 bool cfg_disableControllers = false;
 bool cfg_showBodyFPS = false;
 float cfg_smoothTurnSpeed = 25.0f;
 bool cfg_strafeMode = true;
 float cfg_ipdOffset = 0.0f;
+bool cfg_disableDesktopMirror = false;
 inputController input = {}; //{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
 
 //----
@@ -455,6 +457,7 @@ void writeConfigFile()
         cfgFile << "smoothTurnSpeed: " << cfg_smoothTurnSpeed << std::endl;
         cfgFile << "strafeMode: " << cfg_strafeMode << std::endl;
         cfgFile << "ipdOffset: " << cfg_ipdOffset << std::endl;
+        cfgFile << "disableDesktopMirror: " << cfg_disableDesktopMirror << std::endl;
         cfgFile.close();
     }
     else
@@ -492,6 +495,7 @@ void readConfigFile()
     std::string s_cfg_smoothTurnSpeed = "";
     std::string s_cfg_strafeMode = "";
     std::string s_cfg_ipdOffset = "";
+    std::string s_cfg_disableDesktopMirror = "";
 
     cfgFile.open(g_CONFIG_FILE);
     if (cfgFile.is_open())
@@ -518,6 +522,7 @@ void readConfigFile()
         std::getline(cfgFile, s_cfg_smoothTurnSpeed);
         std::getline(cfgFile, s_cfg_strafeMode);
         std::getline(cfgFile, s_cfg_ipdOffset);
+        std::getline(cfgFile, s_cfg_disableDesktopMirror);
         cfgFile.close();
 
         //----
@@ -542,6 +547,7 @@ void readConfigFile()
         s_cfg_smoothTurnSpeed.erase(0, s_cfg_smoothTurnSpeed.find(": ") + 2);
         s_cfg_strafeMode.erase(0, s_cfg_strafeMode.find(": ") + 2);
         s_cfg_ipdOffset.erase(0, s_cfg_ipdOffset.find(": ") + 2);
+        s_cfg_disableDesktopMirror.erase(0, s_cfg_disableDesktopMirror.find(": ") + 2);
 
         //----
         // set the config options
@@ -565,6 +571,7 @@ void readConfigFile()
         cfg_smoothTurnSpeed = std::stof(s_cfg_smoothTurnSpeed);
         cfg_strafeMode = s_cfg_strafeMode != "0";
         cfg_ipdOffset = std::stof(s_cfg_ipdOffset);
+        cfg_disableDesktopMirror = s_cfg_disableDesktopMirror != "0";
         if (cfg_uiMultiplier < 0.1) cfg_uiMultiplier = 0.1;
         if (cfg_gameMultiplier < 0.1) cfg_gameMultiplier = 0.1;
         if (cfg_smoothTurnSpeed < 1.0f) cfg_smoothTurnSpeed = 1.0f;
@@ -576,7 +583,7 @@ void readConfigFile()
 void CreateTextures(ID3D11Device* devDX11, IDirect3DDevice9* devDX9, POINT textureSize, POINT textureSizeUI)
 {
     HRESULT result = S_OK;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 8; i++)
     {
         BackBuffer11[i].SetWidthHeight(textureSize.x, textureSize.y);
         if(!BackBuffer11[i].Create(devDX11, false, true, false, true))
@@ -660,7 +667,7 @@ void DestroyTextures()
     uiRenderMask.Release();
     uiRender.Release();
 
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 8; i++)
     {
         BackBuffer11[i].Release();
         BackBuffer[i].Release();
@@ -1156,6 +1163,7 @@ void msub_6A2040_post(void* ecx, bool* retVal)
         //logError << bDesc.Width << "x" << bDesc.Height << std::endl;
         //logError << "f:" << bDesc.Format << " : p:" << bDesc.Pool << " : t:" << bDesc.Type << " : u:" << bDesc.Usage << std::endl;
 
+        devDX9->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &mainBackBuffer);
         devDX11.createDevice();
         logError << devDX11.GetErrors();
 
@@ -1355,14 +1363,10 @@ void(__fastcall msub_6A9B40)(void* ecx, void* edx, int a)
 
         if (curEye == 0 || curEye == 1) {
             if (*(float*)(projMatrixAddr + 0x3C) == 0) {
-                XMMATRIX matProj = matProjection[curEye];
-                //matProj._33 = uiOffsetD;// -0.938f;
-                //matProj._34 = -0.06f;
-                matProj._31 *= -1; matProj._32 *= -1; matProj._33 *= -1; matProj._34 *= -1;
+                XMMATRIX matProj = matProjectionNeg[curEye];
                 matProj._43 = *(float*)(projMatrixAddr + 0x38);
 
                 memcpy((void*)projMatrixAddr, &matProj._11, 64);
-                devDX9->SetTransform(D3DTS_PROJECTION, (D3DMATRIX*)&matProj._11);
             }
         }
     }
@@ -1401,6 +1405,12 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
 
         matProjection[0] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 0)._m);
         matProjection[1] = (XMMATRIX)(svr->GetFramePose(poseType::Projection, 1)._m);
+        for (int i = 0; i < 2; i++)
+        {
+            matProjectionNeg[i] = matProjection[i];
+            matProjectionNeg[i]._31 *= -1; matProjectionNeg[i]._32 *= -1;
+            matProjectionNeg[i]._33 *= -1; matProjectionNeg[i]._34 *= -1;
+        }
 
         matEyeOffset[0] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 0)._m);
         matEyeOffset[1] = (XMMATRIX)(svr->GetFramePose(poseType::EyeOffset, 1)._m);
@@ -1414,7 +1424,6 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
 
         HRESULT result = S_OK;
         D3DVIEWPORT9 hViewport, uViewport, mViewport;
-        XMMATRIX identityMatrix = XMMatrixIdentity();
 
         hViewport.X = 0;
         hViewport.Y = 0;
@@ -1509,6 +1518,8 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
         devDX9->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
         devDX9->SetRenderState(D3DRS_ZENABLE, TRUE);
         devDX9->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+
+        static const XMMATRIX identityMatrixStatic = XMMatrixIdentity();
         //----
         // Renders masked ui
         //----
@@ -1517,9 +1528,9 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
         result = devDX9->SetViewport(&mViewport);
         result = devDX9->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(0, 0, 0, 0), 1.0f, 0);
 
-        result = devDX9->SetVertexShaderConstantF(0, &identityMatrix._11, 4);
-        result = devDX9->SetVertexShaderConstantF(4, &identityMatrix._11, 4);
-        result = devDX9->SetVertexShaderConstantF(8, &identityMatrix._11, 4);
+        result = devDX9->SetVertexShaderConstantF(0, &identityMatrixStatic._11, 4);
+        result = devDX9->SetVertexShaderConstantF(4, &identityMatrixStatic._11, 4);
+        result = devDX9->SetVertexShaderConstantF(8, &identityMatrixStatic._11, 4);
         result = devDX9->SetTexture(0, uiRender.pTexture);
         maskedUI.Render();
         //devDX9->StretchRect(uiRender.pShaderResource, NULL, uiRenderMask.pShaderResource, NULL, D3DTEXF_NONE);
@@ -1543,9 +1554,30 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
         XMMATRIX viewMatrix = XMMatrixIdentity();
         XMMATRIX worldMatrix = XMMatrixIdentity();
 
+        //----
+        // Precompute per-eye matrices (inverse+transpose is expensive)
+        //----
+        XMMATRIX hmdData[2];
+        XMMATRIX eyeProjection[2];
+        XMMATRIX eyeView[2];
+        for (int i = 0; i < 2; i++)
+        {
+            hmdData[i] = matEyeOffset[i] * matHMDPos;
+            eyeProjection[i] = XMMatrixTranspose(matProjection[i]);
+            eyeView[i] = XMMatrixTranspose(XMMatrixInverse(0, hmdData[i]));
+        }
+
         if (cfg_disableControllers)
         {
             RunFrameUpdateKeyboard();
+
+            //----
+            // Precompute object transposed matrices once per frame
+            //----
+            XMMATRIX cursorUITransposed = XMMatrixTranspose(cursorUI.GetObjectMatrix());
+            XMMATRIX xyzGizmoTransposed = XMMatrixTranspose(xyzGizmo.GetObjectMatrix());
+            XMMATRIX cursorWorldTransposed = XMMatrixTranspose(cursorWorld.GetObjectMatrix());
+            XMMATRIX curvedUITransposed = XMMatrixTranspose(curvedUI.GetObjectMatrix());
 
             //----
             // Render cursor to to ui windows
@@ -1561,7 +1593,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
             //----
             // Renders mouseover cursor
             //----
-            worldMatrix = cursorUI.GetObjectMatrix(false, true);
+            worldMatrix = cursorUITransposed;
             result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
             result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
             result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1581,11 +1613,10 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 result = devDX9->SetViewport(&viewport);
                 //result = devDX9->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(255, 255, 255, 255), 1.0f, 0);
 
-                XMMATRIX hmdData = matEyeOffset[i] * matHMDPos;
-                projectionMatrix = XMMatrixTranspose(matProjection[i]);
-                viewMatrix = XMMatrixTranspose(XMMatrixInverse(0, (hmdData)));
+                projectionMatrix = eyeProjection[i];
+                viewMatrix = eyeView[i];
                 worldMatrix = XMMatrixIdentity();
-                projectionMatrix._33 = cfg_uiOffsetD;// -0.938f;
+                projectionMatrix._33 = cfg_uiOffsetD;
                 //projectionMatrix._34 =  -0.06f;
 
                 devDX9->SetRenderState(D3DRS_CULLMODE, D3DCULL_CCW);
@@ -1595,7 +1626,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders xyzGizmo pointer
                 //----
-                worldMatrix = xyzGizmo.GetObjectMatrix(false, true);
+                worldMatrix = xyzGizmoTransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1606,7 +1637,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders mouseover cursor
                 //----
-                worldMatrix = cursorWorld.GetObjectMatrix(false, true);
+                worldMatrix = cursorWorldTransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1615,7 +1646,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
 
                 devDX9->SetRenderState(D3DRS_ZENABLE, (doOcclusion) ? TRUE : FALSE);
 
-                worldMatrix = curvedUI.GetObjectMatrix(false, true);
+                worldMatrix = curvedUITransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1628,6 +1659,20 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
         else
         {
             RunFrameUpdateController();
+
+            //----
+            // Precompute object transposed matrices once per frame
+            //----
+            XMMATRIX cursorUITransposed = XMMatrixTranspose(cursorUI.GetObjectMatrix());
+            XMMATRIX xyzGizmoTransposed = XMMatrixTranspose(xyzGizmo.GetObjectMatrix());
+            XMMATRIX cursorWorldTransposed = XMMatrixTranspose(cursorWorld.GetObjectMatrix());
+            XMMATRIX curvedUITransposed = XMMatrixTranspose(curvedUI.GetObjectMatrix());
+            XMMATRIX oskUITransposed = XMMatrixTranspose(oskUI.GetObjectMatrix());
+            XMMATRIX rayLineTransposed = XMMatrixTranspose(rayLine.GetObjectMatrix());
+            XMMATRIX cutUITransposed = XMMatrixTranspose(cutUI.GetObjectMatrix());
+            XMMATRIX handWatchTransposed[3];
+            for (int i = 0; i < 3; i++)
+                handWatchTransposed[i] = XMMatrixTranspose(handWatchSquare[i].GetObjectMatrix());
 
             //----
             // Render cursor to to ui windows
@@ -1643,7 +1688,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
             //----
             // Renders mouseover cursor
             //----
-            worldMatrix = cursorUI.GetObjectMatrix(false, true);
+            worldMatrix = cursorUITransposed;
             result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
             result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
             result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1674,9 +1719,8 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 result = devDX9->SetViewport(&viewport);
                 //result = devDX9->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB(255, 255, 255, 255), 1.0f, 0);
 
-                XMMATRIX hmdData = matEyeOffset[i] * matHMDPos;
-                projectionMatrix = XMMatrixTranspose(matProjection[i]);
-                viewMatrix = XMMatrixTranspose(XMMatrixInverse(0, (hmdData)));
+                projectionMatrix = eyeProjection[i];
+                viewMatrix = eyeView[i];
                 worldMatrix = XMMatrixIdentity();
                 projectionMatrix._33 = cfg_uiOffsetD;// -0.938f;
                 //projectionMatrix._34 =  -0.06f;
@@ -1687,7 +1731,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders keyboard
                 //----
-                worldMatrix = oskUI.GetObjectMatrix(false, true);
+                worldMatrix = oskUITransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1701,7 +1745,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 for (int i = 0; i < watchCount; i++)
                 {
                     int activeOffset = ((handWatchAtUI[i]) ? 1 : 0);
-                    worldMatrix = handWatchSquare[i].GetObjectMatrix(false, true);
+                    worldMatrix = handWatchTransposed[i];
                     result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1712,7 +1756,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders the ray
                 //----
-                worldMatrix = rayLine.GetObjectMatrix(false, true);
+                worldMatrix = rayLineTransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1723,7 +1767,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders xyzGizmo pointer
                 //----
-                worldMatrix = xyzGizmo.GetObjectMatrix(false, true);
+                worldMatrix = xyzGizmoTransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1734,7 +1778,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 // Renders mouseover cursor
                 //----
-                worldMatrix = cursorWorld.GetObjectMatrix(false, true);
+                worldMatrix = cursorWorldTransposed;
                 result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1748,7 +1792,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 //----
                 if (doCutUI && !gPlayerObj)
                 {
-                    worldMatrix = cutUI.GetObjectMatrix(false, true);
+                    worldMatrix = cutUITransposed;
                     result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1757,7 +1801,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 }
                 else if (doCutUI && gPlayerObj)
                 {
-                    worldMatrix = cutUI.GetObjectMatrix(false, true);
+                    worldMatrix = cutUITransposed;
                     result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1766,7 +1810,7 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 }
                 else if (!doCutUI)
                 {
-                    worldMatrix = curvedUI.GetObjectMatrix(false, true);
+                    worldMatrix = curvedUITransposed;
                     result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
                     result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
@@ -1812,11 +1856,18 @@ void(__fastcall msub_4A8720)()
         }
 
         int tIndex = textureIndex;
+
+        //----
+        // Copies texture to back buffer (before Submit to avoid GPU pipeline flush after blocking)
+        //----
+        if (!cfg_disableDesktopMirror)
+            devDX9->StretchRect(BackBuffer[0].pShaderResource, NULL, mainBackBuffer, NULL, D3DTEXF_NONE);
+
         svr->Render(BackBuffer11[tIndex].pTexture, DepthBuffer11[tIndex].pTexture, BackBuffer11[tIndex + 3].pTexture, DepthBuffer11[tIndex + 3].pTexture);
         if (svr->HasErrors())
             logError << svr->GetErrors();
 
-        textureIndex = ((textureIndex + 1) % 3);
+        textureIndex = ((textureIndex + 1) % 4);
 
         if (gPlayerObj && gPlayerObj->pModelContainer->p20Container->ptr20)
         {
@@ -1854,16 +1905,6 @@ void(__fastcall msub_4A8720)()
 
         if (cfg_OSK && isRunningAsAdmin)
             RunOSKUpdate();
-
-        //----
-        // Copies texture to back buffer
-        //----
-        IDirect3DSurface9* pBackBuffer = nullptr;
-        devDX9->GetBackBuffer(NULL, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
-        //devDX9->StretchRect(uiRender.pShaderResource, NULL, pBackBuffer, NULL, D3DTEXF_NONE);
-        devDX9->StretchRect(BackBuffer[0].pShaderResource, NULL, pBackBuffer, NULL, D3DTEXF_NONE);
-
-        pBackBuffer->Release();
     }
     else
     {
@@ -2021,7 +2062,12 @@ void RunFrameUpdateController()
     //----
     // Add all the interactable items to the intersect list
     //----
-    std::list<intersectLayout> intersectList = std::list<intersectLayout>();
+    static std::vector<intersectLayout> intersectList;
+    intersectList.clear();
+    static std::vector<intersectPoint> emptyIntersections;
+    static std::vector<bool> emptyInteraction;
+    emptyIntersections.clear();
+    emptyInteraction.clear();
     XMMATRIX uiScaleMatrix = XMMatrixScaling(cfg_uiOffsetScale, cfg_uiOffsetScale, cfg_uiOffsetScale);
     XMMATRIX uiZMatrix = XMMatrixTranslation(0.0f, 0.0f, (cfg_uiOffsetZ / 100.0f));
     XMMATRIX moveMatrix = XMMatrixTranslation(0.0f, (cfg_uiOffsetY / 100.0f), 0.0f);
@@ -2077,7 +2123,7 @@ void RunFrameUpdateController()
 
             XMMATRIX mouseoverPos = uiView->at(uiCutupLayout::mouseover).matPosition;
             XMMATRIX mouseoverScale = XMMatrixScaling(uiView->at(uiCutupLayout::mouseover).scale.x, uiView->at(uiCutupLayout::mouseover).scale.y, uiView->at(uiCutupLayout::mouseover).scale.z);
-            XMMATRIX mouseoverOffset = XMMatrixTranslation(0.f, 0.15f, -0.2f);
+            static const XMMATRIX mouseoverOffset = XMMatrixTranslation(0.f, 0.15f, -0.2f);
             XMVECTOR mouseoverVec = { mouseoverPos._41, mouseoverPos._42, mouseoverPos._43 };
             mouseoverPos = XMMatrixIdentity();
             mouseoverPos._41 = mouseoverVec.vector4_f32[0];
@@ -2089,8 +2135,12 @@ void RunFrameUpdateController()
         //----
         // Each square has 2 triangles
         //----
-        std::vector<bool> uiInteract = std::vector<bool>(uiView->size() * 2);
-        std::vector<float> vertices = std::vector<float>();
+        static std::vector<bool> uiInteract;
+        static std::vector<float> vertices;
+        uiInteract.clear();
+        uiInteract.resize(uiView->size() * 2);
+        vertices.clear();
+        vertices.reserve(uiView->size() * 6 * 5);
         for (unsigned int i = 0; i < uiView->size(); i++)
         {
             uiView->at(i).setBufferStart((i * 6));
@@ -2136,14 +2186,14 @@ void RunFrameUpdateController()
             uiInteract[i * 2 + 0] = uiView->at(i).enableDetect;
             uiInteract[i * 2 + 1] = uiView->at(i).enableDetect;
         }
-        cutUI.SetVertexBuffer(vertices, 5, true);
+        cutUI.SetVertexBuffer(vertices.data(), (int)vertices.size(), 5, true);
         cutUI.SetObjectMatrix(XMMatrixIdentity());// cameraMatrix);
         //cutUI.SetObjectMatrix(uiScaleMatrix * uiZMatrix * moveMatrix);
 
         //stScreenLayout screenLayoutFixed = screenLayout;
         //screenLayoutFixed.width = 1920;
         //screenLayoutFixed.height = 1080;
-        intersectList.push_back({ &cutUI, &curvedUIAtUI, &screenLayout, std::vector<intersectPoint>(), uiInteract, 1, isOverUI, false, true });
+        intersectList.push_back({ &cutUI, &curvedUIAtUI, &screenLayout, emptyIntersections, uiInteract, 1, isOverUI, false, true });
     }
     else if (!doCutUI)
     {
@@ -2151,7 +2201,7 @@ void RunFrameUpdateController()
         curvedUI.SetObjectMatrix(aspectScaleMatrix * playerOffset);// *(uiScaleMatrix* uiZMatrix* moveMatrix));
 
         //              item, atUI, layout, intersection, dist, multiplier, updateDistance, forceMouse, fromCenter;
-        intersectList.push_back({ &curvedUI, &curvedUIAtUI, &screenLayout, std::vector<intersectPoint>(), std::vector<bool>(), 1, isOverUI, false, true });
+              intersectList.push_back({ &curvedUI, &curvedUIAtUI, &screenLayout, emptyIntersections, emptyInteraction, 1, isOverUI, false, true });
     }
 
     //----
@@ -2165,21 +2215,20 @@ void RunFrameUpdateController()
 
     XMMATRIX aspectScaleMatrixOSK = XMMatrixScaling(1, aspect, 1);
     XMMATRIX scaleMatrixOSK = XMMatrixScaling(0.4f, 0.4f, 1.f);
-    XMMATRIX rotateMatrixOSK = XMMatrixRotationX(-30.0f * Deg2Rad);
-    XMMATRIX moveMatrixOSK = XMMatrixTranslation(0.0f, -0.6f, 0.2f);
+    static const XMMATRIX rotateMatrixOSK = XMMatrixRotationX(-30.0f * Deg2Rad);
+    static const XMMATRIX moveMatrixOSK = XMMatrixTranslation(0.0f, -0.6f, 0.2f);
     XMMATRIX scaleOSK = (oskLayout != nullptr && oskLayout->haveLayout && showOSK) ? XMMatrixScaling(1.0f, 1.0f, 1.0f) : zeroScale;
     XMMATRIX offsetMatrixOSK = XMMatrixTranslation(oskOffset.x, oskOffset.y, oskOffset.z);
     oskUI.SetObjectMatrix(aspectScaleMatrixOSK * scaleOSK * scaleMatrixOSK * rotateMatrixOSK * moveMatrixOSK * (uiScaleMatrix * uiZMatrix * moveMatrix));// * scaleOSK);
 
-    intersectList.push_back({ &oskUI, &oskAtUI, oskLayout, std::vector<intersectPoint>(), std::vector<bool>(), 1, true, true, false });
+    intersectList.push_back({ &oskUI, &oskAtUI, oskLayout, emptyIntersections, emptyInteraction, 1, true, true, false });
 
     //----
     // Back of hand squares
     //----
-    XMMATRIX rotateX = XMMatrixRotationX(180.f * Deg2Rad);
-    XMMATRIX rotateY = XMMatrixRotationY(90.f * Deg2Rad);
-    XMMATRIX rotateZ = XMMatrixRotationZ(0.f * Deg2Rad);
-    XMMATRIX viewportRot = rotateX * rotateY * rotateZ;
+    static const XMMATRIX rotateX = XMMatrixRotationX(180.f * Deg2Rad);
+    static const XMMATRIX rotateY = XMMatrixRotationY(90.f * Deg2Rad);
+    static const XMMATRIX viewportRot = rotateX * rotateY;
 
     int x = 0;
     int y = 0;
@@ -2191,7 +2240,7 @@ void RunFrameUpdateController()
         XMMATRIX moveMatrix = XMMatrixTranslation(-0.14f + (x * 2) * 0.010f, 0.06f + (y * 2) * 0.010f, 0.0f);
         handWatchSquare[i].SetObjectMatrix((ScaleMatrix * moveMatrix) * viewportRot * matController[0]);
 
-        intersectList.push_back({ &handWatchSquare[i], &handWatchAtUI[i], &screenLayout, std::vector<intersectPoint>(), std::vector<bool>(), 1, true, true, false});
+        intersectList.push_back({ &handWatchSquare[i], &handWatchAtUI[i], &screenLayout, emptyIntersections, emptyInteraction, 1, true, true, false});
 
         x++;
         if (x >= 3)
@@ -2214,8 +2263,7 @@ void RunFrameUpdateController()
     //----
     // Ray Data
     //----
-    std::vector<float> lineData =
-    {
+    float lineData[14] = {
         originS.vector4_f32[0], originS.vector4_f32[1], originS.vector4_f32[2], 1.0f, 0.0f, 0.0f, 1.0f,
         end.vector4_f32[0],    end.vector4_f32[1],    end.vector4_f32[2],    1.0f, 0.0f, 0.0f, 1.0f
     };
@@ -2227,18 +2275,18 @@ void RunFrameUpdateController()
     int maskHeight = uiBufferSize.y / 4;
 
     float dist = -9999;
-    intersectLayout closest = intersectLayout();
-    int closestIndex = -1;
+    int closestIdx = -1;
+    int closestIntersectionIdx = -1;
     HRESULT result = S_OK;
-    //isOverUI = false;
-    for (std::list<intersectLayout>::iterator it = intersectList.begin(); it != intersectList.end(); ++it)
+    for (size_t idx = 0; idx < intersectList.size(); idx++)
     {
-        if (it->layout == nullptr || it->layout->haveLayout)
+        auto& it = intersectList[idx];
+        if (it.layout == nullptr || it.layout->haveLayout)
         {
-            *(it->atUI) = it->item->RayIntersection(originS, norm, &it->intersection, it->interaction, &logError);
-            if(*(it->atUI) == true)
+            *(it.atUI) = it.item->RayIntersection(originS, norm, &it.intersection, it.interaction, &logError);
+            if(*(it.atUI) == true)
             {
-                for (int i = 0; i < it->intersection.size(); i++)
+                for (size_t i = 0; i < it.intersection.size(); i++)
                 {
                     bool isOverUIElement = true;
                     if (oskAtUI || handWatchAtUI[0] || handWatchAtUI[1] || handWatchAtUI[2])
@@ -2249,11 +2297,11 @@ void RunFrameUpdateController()
                     {
                     }
 
-                    if (isOverUIElement && it->intersection[i].distance >= dist)
+                    if (isOverUIElement && it.intersection[i].distance >= dist)
                     {
-                        dist = it->intersection[i].distance;
-                        closest = *it;
-                        closestIndex = i;
+                        dist = it.intersection[i].distance;
+                        closestIdx = (int)idx;
+                        closestIntersectionIdx = (int)i;
                         //isOverUI = true;
                     }
                 }
@@ -2261,8 +2309,9 @@ void RunFrameUpdateController()
         }
     }
 
-    if (closest.item != nullptr && closestIndex >= 0)
+    if (closestIdx >= 0 && closestIntersectionIdx >= 0)
     {
+        auto& closest = intersectList[closestIdx];
         HWND useHWND = 0;
         if (closest.layout != nullptr)
         {
@@ -2272,16 +2321,16 @@ void RunFrameUpdateController()
             //----
             // converts uv (0.0->1.0) to screen coords | width/height
             //----
-            closest.intersection[closestIndex].point.vector4_f32[0] = closest.intersection[closestIndex].point.vector4_f32[0] * closest.layout->width;
-            closest.intersection[closestIndex].point.vector4_f32[1] = closest.intersection[closestIndex].point.vector4_f32[1] * closest.layout->height;
+            closest.intersection[closestIntersectionIdx].point.vector4_f32[0] = closest.intersection[closestIntersectionIdx].point.vector4_f32[0] * closest.layout->width;
+            closest.intersection[closestIntersectionIdx].point.vector4_f32[1] = closest.intersection[closestIntersectionIdx].point.vector4_f32[1] * closest.layout->height;
 
             //----
             // Changes anchor from top left corner to middle of screen
             //----
             if (closest.fromCenter)
             {
-                closest.intersection[closestIndex].point.vector4_f32[0] = halfScreen.x + (closest.intersection[closestIndex].point.vector4_f32[0] - halfScreen.x);
-                closest.intersection[closestIndex].point.vector4_f32[1] = halfScreen.y + (closest.intersection[closestIndex].point.vector4_f32[1] - halfScreen.y);
+                closest.intersection[closestIntersectionIdx].point.vector4_f32[0] = halfScreen.x + (closest.intersection[closestIntersectionIdx].point.vector4_f32[0] - halfScreen.x);
+                closest.intersection[closestIntersectionIdx].point.vector4_f32[1] = halfScreen.y + (closest.intersection[closestIntersectionIdx].point.vector4_f32[1] - halfScreen.y);
             }
             useHWND = closest.layout->hwnd;
         }
@@ -2294,14 +2343,14 @@ void RunFrameUpdateController()
             lineData[9] = end.vector4_f32[2];
         }
 
-        SetMousePosition(useHWND, (int)closest.intersection[closestIndex].point.vector4_f32[0], (int)closest.intersection[closestIndex].point.vector4_f32[1], closest.forceMouse);
+        SetMousePosition(useHWND, (int)closest.intersection[closestIntersectionIdx].point.vector4_f32[0], (int)closest.intersection[closestIntersectionIdx].point.vector4_f32[1], closest.forceMouse);
     }
     else// if (!curvedUIAtUI)
     {
         SetMousePosition(screenLayout.hwnd, halfScreen.x, halfScreen.y, false);
     }
 
-    rayLine.SetVertexBuffer(lineData, 7, true);
+    rayLine.SetVertexBuffer(lineData, 14, 7, true);
 }
 
 void RunFrameUpdateKeyboard()
@@ -2706,7 +2755,7 @@ void RunControllerGame()
                         if (rightStickXCenter)
                         {
                             rightStickXCenter = false;
-                            hRotationOffset = cfg_snapRotateAmountX * Deg2Rad * ((analogActionData.x > 0) - (analogActionData.x < 0));
+                            hRotationOffset = cfg_snapRotateAmountX * Deg2Rad * ((analogActionData.x < 0) - (analogActionData.x > 0));
                         }
                     }
                     else

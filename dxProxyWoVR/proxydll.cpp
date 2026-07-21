@@ -7,6 +7,22 @@ cIDirect3D9* glIDirect3D9;
 HINSTANCE glOriginalDll;
 HINSTANCE glThisInstance;
 
+typedef int    (WINAPI* D3DPERF_BeginEvent_t)(D3DCOLOR, LPCWSTR);
+typedef int    (WINAPI* D3DPERF_EndEvent_t)(void);
+typedef DWORD  (WINAPI* D3DPERF_GetStatus_t)(void);
+typedef BOOL   (WINAPI* D3DPERF_QueryRepeatFrame_t)(void);
+typedef void   (WINAPI* D3DPERF_SetMarker_t)(D3DCOLOR, LPCWSTR);
+typedef void   (WINAPI* D3DPERF_SetOptions_t)(DWORD);
+typedef void   (WINAPI* D3DPERF_SetRegion_t)(D3DCOLOR, LPCWSTR);
+
+D3DPERF_BeginEvent_t       pfn_D3DPERF_BeginEvent = nullptr;
+D3DPERF_EndEvent_t         pfn_D3DPERF_EndEvent = nullptr;
+D3DPERF_GetStatus_t        pfn_D3DPERF_GetStatus = nullptr;
+D3DPERF_QueryRepeatFrame_t pfn_D3DPERF_QueryRepeatFrame = nullptr;
+D3DPERF_SetMarker_t        pfn_D3DPERF_SetMarker = nullptr;
+D3DPERF_SetOptions_t       pfn_D3DPERF_SetOptions = nullptr;
+D3DPERF_SetRegion_t        pfn_D3DPERF_SetRegion = nullptr;
+
 std::ofstream ofOut;
 std::stringstream logError;
 bool doLog = false;
@@ -43,6 +59,14 @@ void LoadOriginalDll(void)
 	if (!glOriginalDll) {
 		ExitProcess(0);
 	}
+
+	pfn_D3DPERF_BeginEvent       = (D3DPERF_BeginEvent_t)GetProcAddress(glOriginalDll, "D3DPERF_BeginEvent");
+	pfn_D3DPERF_EndEvent         = (D3DPERF_EndEvent_t)GetProcAddress(glOriginalDll, "D3DPERF_EndEvent");
+	pfn_D3DPERF_GetStatus        = (D3DPERF_GetStatus_t)GetProcAddress(glOriginalDll, "D3DPERF_GetStatus");
+	pfn_D3DPERF_QueryRepeatFrame = (D3DPERF_QueryRepeatFrame_t)GetProcAddress(glOriginalDll, "D3DPERF_QueryRepeatFrame");
+	pfn_D3DPERF_SetMarker        = (D3DPERF_SetMarker_t)GetProcAddress(glOriginalDll, "D3DPERF_SetMarker");
+	pfn_D3DPERF_SetOptions       = (D3DPERF_SetOptions_t)GetProcAddress(glOriginalDll, "D3DPERF_SetOptions");
+	pfn_D3DPERF_SetRegion        = (D3DPERF_SetRegion_t)GetProcAddress(glOriginalDll, "D3DPERF_SetRegion");
 
 	return;
 }
@@ -101,65 +125,44 @@ void EnsureOriginalDll()
 
 int WINAPI D3DPERF_BeginEvent(D3DCOLOR col, LPCWSTR wszName)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return 0;
-	typedef int (WINAPI* D3D9_Type)(D3DCOLOR col, LPCWSTR wszName);
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_BeginEvent");
-	return D3D9_fn ? D3D9_fn(col, wszName) : 0;
+	if (!pfn_D3DPERF_BeginEvent) return 0;
+	return pfn_D3DPERF_BeginEvent(col, wszName);
 }
 
 int WINAPI D3DPERF_EndEvent(void)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return 0;
-	typedef int (WINAPI* D3D9_Type)();
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_EndEvent");
-	return D3D9_fn ? D3D9_fn() : 0;
+	if (!pfn_D3DPERF_EndEvent) return 0;
+	return pfn_D3DPERF_EndEvent();
 }
 
 DWORD WINAPI D3DPERF_GetStatus(void)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return 0;
-	typedef DWORD(WINAPI* D3D9_Type)();
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_GetStatus");
-	return D3D9_fn ? D3D9_fn() : 0;
+	if (!pfn_D3DPERF_GetStatus) return 0;
+	return pfn_D3DPERF_GetStatus();
 }
 
 BOOL WINAPI D3DPERF_QueryRepeatFrame(void)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return FALSE;
-	typedef BOOL(WINAPI* D3D9_Type)();
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_QueryRepeatFrame");
-	return D3D9_fn ? D3D9_fn() : FALSE;
+	if (!pfn_D3DPERF_QueryRepeatFrame) return FALSE;
+	return pfn_D3DPERF_QueryRepeatFrame();
 }
 
 void WINAPI D3DPERF_SetMarker(D3DCOLOR col, LPCWSTR wszName)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return;
-	typedef void (WINAPI* D3D9_Type)(D3DCOLOR col, LPCWSTR wszName);
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_SetMarker");
-	if (D3D9_fn) D3D9_fn(col, wszName);
+	if (!pfn_D3DPERF_SetMarker) return;
+	pfn_D3DPERF_SetMarker(col, wszName);
 }
 
 void WINAPI D3DPERF_SetOptions(DWORD dwOptions)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return;
-	typedef void (WINAPI* D3D9_Type)(DWORD dwOptions);
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_SetOptions");
-	if (D3D9_fn) D3D9_fn(dwOptions);
+	if (!pfn_D3DPERF_SetOptions) return;
+	pfn_D3DPERF_SetOptions(dwOptions);
 }
 
 void WINAPI D3DPERF_SetRegion(D3DCOLOR col, LPCWSTR wszName)
 {
-	EnsureOriginalDll();
-	if (!glOriginalDll) return;
-	typedef void (WINAPI* D3D9_Type)(D3DCOLOR col, LPCWSTR wszName);
-	D3D9_Type D3D9_fn = (D3D9_Type)GetProcAddress(glOriginalDll, "D3DPERF_SetRegion");
-	if (D3D9_fn) D3D9_fn(col, wszName);
+	if (!pfn_D3DPERF_SetRegion) return;
+	pfn_D3DPERF_SetRegion(col, wszName);
 }
 
 IDirect3D9* WINAPI Direct3DCreate9(UINT SDKVersion)

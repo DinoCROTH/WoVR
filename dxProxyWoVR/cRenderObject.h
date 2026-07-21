@@ -48,6 +48,7 @@ public:
 	RenderObject(IDirect3DDevice9* tdev);
 
 	bool SetVertexBuffer(std::vector<float> vertices, int itmStride, bool ignoreCreateBuffer = false, D3DPOOL usage = D3DPOOL_DEFAULT);
+	bool SetVertexBuffer(float* data, int count, int itmStride, bool ignoreCreateBuffer = false, D3DPOOL usage = D3DPOOL_DEFAULT);
 	bool SetIndexBuffer(std::vector<short> indices, bool ignoreCreateBuffer = false, D3DPOOL usage = D3DPOOL_DEFAULT);
 	void SetShadersLayout(IDirect3DVertexDeclaration9* layout, IDirect3DVertexShader9* vertex, IDirect3DPixelShader9* pixel);
 	void MapResourceVertex(void* data, int size);

@@ -3,6 +3,7 @@
 
 simpleVR::simpleVR(bool showLogs) : printLogs(showLogs)
 {
+	m_frameIntervals.reserve(600);
 	InitalizeVR();
 }
 
@@ -235,6 +236,9 @@ bool simpleVR::StartVR()
 		bufferSize.y = (long)(bufferSize.y / std::fmax(textureBounds[0].vMax - textureBounds[0].vMin, textureBounds[1].vMax - textureBounds[1].vMin));
 		
 		_isConnected = true;
+
+		for (uint32_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++)
+			rDeviceClass[i] = openVRSession->GetTrackedDeviceClass(i);
 	}
 
 	Recenter();
@@ -278,37 +282,13 @@ void simpleVR::SetFramePose()
 {
 	if (openVRSession && _isConnected)
 	{
-		static int lContNum = 0;
-		static int rContNum = 0;
-
-		vr::ETrackingUniverseOrigin universeOrigin = vr::VRCompositor()->GetTrackingSpace();
-		//vr::VRCompositor()->WaitGetPoses(rTrackedDevicePose, vr::k_unMaxTrackedDeviceCount, NULL, 0);
-		vr::VRCompositor()->GetLastPoses(rTrackedDevicePose, vr::k_unMaxTrackedDeviceCount, NULL, 0);
-
 		vr::TrackedDevicePose_t hmdPose = vr::TrackedDevicePose_t();
 
-		//----
-		// Loops though all (MaxDeviceCount(16)) available positions
-		//----
 		for (uint32_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++) {
-			//----
-			// Determines if there is a device connected to this index
-			//----
 			if (rTrackedDevicePose[i].bDeviceIsConnected) {
-				//----
-				// If there is a device connected, check and see if it is tracking and we have a valid pose
-				//----
 				if (rTrackedDevicePose[i].bPoseIsValid) {
-					//----
-					// Get the pose of the HMD itself
-					//----
-					vr::ETrackedDeviceClass classType = openVRSession->GetTrackedDeviceClass(i);
-					if (classType == vr::TrackedDeviceClass_HMD) {
+					if (rDeviceClass[i] == vr::TrackedDeviceClass_HMD) {
 						hmdPose = rTrackedDevicePose[i];
-
-						//----
-						// Get the pose of the controllers
-						//----
 					}
 				}
 			}
@@ -436,11 +416,13 @@ void simpleVR::Render(ID3D11Texture2D* leftEye, ID3D11Texture2D* leftDepth, ID3D
 		vr::EVRCompositorError error = vr::VRCompositorError_None;
 		error = vr::VRCompositor()->Submit(vr::Eye_Left, (vr::Texture_t*)&completeDepth[0], &textureBounds[0], vr::Submit_TextureWithDepth);
 		if (error) {
+			m_hasErrors = true;
 			logError << "SimpleVR VRCompositor Error (L): " << std::hex << error << std::endl;
 		}
 
 		error = vr::VRCompositor()->Submit(vr::Eye_Right, (vr::Texture_t*)&completeDepth[1], &textureBounds[1], vr::Submit_TextureWithDepth);
 		if (error) {
+			m_hasErrors = true;
 			logError << "SimpleVR VRCompositor Error (R): " << std::hex << error << std::endl;
 		}
 	}
@@ -463,7 +445,7 @@ void simpleVR::MakeIPDOffset()
 
 bool simpleVR::HasErrors()
 {
-	return ((logError.rdbuf()->in_avail() == 0) ? false : true);
+	return m_hasErrors;
 }
 
 std::string simpleVR::GetErrors()

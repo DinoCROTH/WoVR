@@ -36,6 +36,31 @@ bool RenderObject::SetVertexBuffer(std::vector<float> vertices, int itmStride, b
 	return vertexSet;
 }
 
+bool RenderObject::SetVertexBuffer(float* data, int count, int itmStride, bool ignoreCreateBuffer, D3DPOOL usage)
+{
+	stride = itmStride;
+	byteStride = stride * sizeof(float);
+	vertexCount = count / stride;
+
+	vertexSet = false;
+	if (count > 0)
+	{
+		HRESULT result = S_OK;
+		if (!ignoreCreateBuffer && vertexBuffer)
+			result = vertexBuffer->Release();
+
+		if (!ignoreCreateBuffer)
+			result = dev->CreateVertexBuffer(count * sizeof(float), D3DUSAGE_WRITEONLY, NULL, usage, &vertexBuffer, NULL);
+
+		if (FAILED(result))
+			return false;
+		else
+			MapResourceVertex(data, count * sizeof(float));
+		vertexSet = true;
+	}
+	return vertexSet;
+}
+
 bool RenderObject::SetIndexBuffer(std::vector<short> indices, bool ignoreCreateBuffer, D3DPOOL usage)
 {
 	indexList = indices;
@@ -73,7 +98,7 @@ void RenderObject::MapResourceVertex(void* data, int size)
 	void* pVoid;
 	if (vertexBuffer)
 	{
-		vertexBuffer->Lock(0, 0, (void**)&pVoid, 0);
+		vertexBuffer->Lock(0, 0, (void**)&pVoid, D3DLOCK_DISCARD);
 		memcpy(pVoid, data, size);
 		vertexBuffer->Unlock();
 	}
@@ -84,7 +109,7 @@ void RenderObject::MapResourceIndex(void* data, int size)
 	void* pVoid;
 	if (indexBuffer)
 	{
-		indexBuffer->Lock(0, 0, (void**)&pVoid, 0);
+		indexBuffer->Lock(0, 0, (void**)&pVoid, D3DLOCK_DISCARD);
 		memcpy(pVoid, data, size);
 		indexBuffer->Unlock();
 	}
