@@ -1090,6 +1090,19 @@ void UpdateCharacterAnimation_post(stObjectManager* playerObj)
         *(XMMATRIX*)(playerObj->pModelContainer->ptrBonePos + (0x40 * headParentId)) = newHead * zeroScale;
         for (int childId : boneLookup.allChildren[headParentId])
             *(XMMATRIX*)(playerObj->pModelContainer->ptrBonePos + (0x40 * childId)) = newHead * zeroScale;
+
+        if (cfg_showBodyFPS && playerObj->pModelContainer)
+        {
+            float hmdX = matHMDPos.r[3].vector4_f32[0];
+            float hmdY = matHMDPos.r[3].vector4_f32[1];
+            float hmdZ = matHMDPos.r[3].vector4_f32[2];
+
+            XMMATRIX charMat = (XMMATRIX)(playerObj->pModelContainer->characterMatrix._m);
+            charMat.r[3].vector4_f32[0] += -hmdZ;
+            charMat.r[3].vector4_f32[1] += -hmdX;
+            charMat.r[3].vector4_f32[2] += hmdY;
+            memcpy(playerObj->pModelContainer->characterMatrix._m, &charMat, sizeof(float) * 16);
+        }
     }
 }
 
