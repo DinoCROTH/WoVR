@@ -62,6 +62,9 @@ int oskRenderCount = -1;
 bool showOSK = true;
 bool oldOSK = true;
 bool isRunningAsAdmin = false;
+
+bool steamVRKeyboardOpen = false;
+std::string steamVRKeyboardBuffer;
 bool defaultCutupResolution = false;
 bool isPossessing = false;
 
@@ -185,6 +188,23 @@ float cfg_smoothTurnSpeed = 25.0f;
 bool cfg_strafeMode = true;
 float cfg_ipdOffset = 0.0f;
 bool cfg_disableDesktopMirror = false;
+
+std::string cfg_rightA = "jump";
+std::string cfg_rightB = "target_nearest";
+std::string cfg_leftX = "map";
+std::string cfg_leftY = "escape";
+std::string cfg_leftStick = "mount";
+std::string cfg_rightStick = "first_third_person";
+std::string cfg_rightABumper = "9";
+std::string cfg_rightBBumper = "8";
+std::string cfg_leftXBumper = "2";
+std::string cfg_leftYBumper = "3";
+std::string cfg_leftStickBumper = "1";
+std::string cfg_rightStickBumper = "0";
+std::string cfg_watch0 = "occlusion";
+std::string cfg_watch1 = "keyboard";
+std::string cfg_watch2 = "menu_swap";
+
 inputController input = {}; //{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
 
 //----
@@ -395,40 +415,111 @@ void RunOSKDisable()
     oskRenderCount = -1;
 }
 
-void RunOSKUpdate()
+void ToggleSteamVRKeyboard()
 {
-    //----
-    // Hide keyboard if shown after a few frames
-    //----
-    if (cfg_OSK && oskRenderCount <= 0 && oldOSK != showOSK)
-    {
-        oldOSK = showOSK;
-        osk.ShowHide(showOSK);
+    vr::IVROverlay* overlay = vr::VROverlay();
+    if (!overlay) return;
 
-        //----
-        // move chat down while keyboard is shown
-        //----
-        if (showOSK == true)
+    if (steamVRKeyboardOpen)
+    {
+        overlay->HideKeyboard();
+        steamVRKeyboardOpen = false;
+    }
+    else
+    {
+        steamVRKeyboardBuffer.clear();
+        setKeyDown(VK_RETURN);
+        setKeyUp(VK_RETURN);
+        overlay->ShowKeyboard(
+            vr::k_EGamepadTextInputModeNormal,
+            vr::k_EGamepadTextInputLineModeSingleLine,
+            vr::KeyboardFlag_Modal,
+            "WoW Chat",
+            512,
+            "",
+            0);
+        steamVRKeyboardOpen = true;
+    }
+}
+
+void PollSteamVRKeyboardEvents()
+{
+    if (!steamVRKeyboardOpen) return;
+
+    vr::IVROverlay* overlay = vr::VROverlay();
+    vr::IVRSystem* system = vr::VRSystem();
+    if (!overlay || !system) return;
+
+    vr::VREvent_t event;
+    while (system->PollNextEvent(&event, sizeof(event)))
+    {
+        if (event.eventType == vr::VREvent_KeyboardCharInput)
         {
-            uiViewGame.at(uiCutupLayout::chatbox).rotation.x = 0;
-            uiViewGame.at(uiCutupLayout::chatbox).offset.y = -0.16f;
+            const char* newInput = event.data.keyboard.cNewInput;
+            for (int i = 0; newInput[i] != '\0'; i++)
+            {
+                char c = newInput[i];
+                if (c == '\b')
+                {
+                    setKeyDown(VK_BACK);
+                    setKeyUp(VK_BACK);
+                }
+                else if (c == '\n' || c == '\r')
+                {
+                    setKeyDown(VK_RETURN);
+                    setKeyUp(VK_RETURN);
+                }
+                else
+                {
+                    SHORT vk = VkKeyScanA(c);
+                    BYTE key = (BYTE)(vk & 0xFF);
+                    bool shift = (vk >> 8) & 1;
+                    if (shift) setKeyDown(VK_SHIFT);
+                    setKeyDown(key);
+                    setKeyUp(key);
+                    if (shift) setKeyUp(VK_SHIFT);
+                }
+            }
         }
-        else
+        else if (event.eventType == vr::VREvent_KeyboardDone)
         {
-            uiViewGame.at(uiCutupLayout::chatbox).rotation.x = 20;
-            uiViewGame.at(uiCutupLayout::chatbox).offset.y = 0.16f;
+            char text[512] = {};
+            uint32_t len = overlay->GetKeyboardText(text, sizeof(text));
+            if (len > 0)
+            {
+                for (uint32_t i = 0; i < len; i++)
+                {
+                    char c = text[i];
+                    if (c == '\b')
+                    {
+                        setKeyDown(VK_BACK);
+                        setKeyUp(VK_BACK);
+                    }
+                    else if (c == '\n' || c == '\r')
+                    {
+                        setKeyDown(VK_RETURN);
+                        setKeyUp(VK_RETURN);
+                    }
+                    else
+                    {
+                        SHORT vk = VkKeyScanA(c);
+                        BYTE key = (BYTE)(vk & 0xFF);
+                        bool shift = (vk >> 8) & 1;
+                        if (shift) setKeyDown(VK_SHIFT);
+                        setKeyDown(key);
+                        setKeyUp(key);
+                        if (shift) setKeyUp(VK_SHIFT);
+                    }
+                }
+            }
+            overlay->HideKeyboard();
+            steamVRKeyboardOpen = false;
+        }
+        else if (event.eventType == vr::VREvent_KeyboardClosed)
+        {
+            steamVRKeyboardOpen = false;
         }
     }
-    if (oskLayout != nullptr && oskLayout->haveLayout && oskRenderCount > 0)
-        oskRenderCount--;
-    else if (cfg_OSK && oskLayout != nullptr && !oskLayout->haveLayout)
-    {
-        RunOSKDisable();
-        RunOSKEnable();
-    }
-
-    if (cfg_OSK && showOSK)
-        osk.CopyOSKTexture9(devDX9, &oskTexture);
 }
 
 int cfg_tID = 0;
@@ -458,6 +549,21 @@ void writeConfigFile()
         cfgFile << "strafeMode: " << cfg_strafeMode << std::endl;
         cfgFile << "ipdOffset: " << cfg_ipdOffset << std::endl;
         cfgFile << "disableDesktopMirror: " << cfg_disableDesktopMirror << std::endl;
+        cfgFile << "rightA: " << cfg_rightA << std::endl;
+        cfgFile << "rightB: " << cfg_rightB << std::endl;
+        cfgFile << "leftX: " << cfg_leftX << std::endl;
+        cfgFile << "leftY: " << cfg_leftY << std::endl;
+        cfgFile << "leftStick: " << cfg_leftStick << std::endl;
+        cfgFile << "rightStick: " << cfg_rightStick << std::endl;
+        cfgFile << "rightABumper: " << cfg_rightABumper << std::endl;
+        cfgFile << "rightBBumper: " << cfg_rightBBumper << std::endl;
+        cfgFile << "leftXBumper: " << cfg_leftXBumper << std::endl;
+        cfgFile << "leftYBumper: " << cfg_leftYBumper << std::endl;
+        cfgFile << "leftStickBumper: " << cfg_leftStickBumper << std::endl;
+        cfgFile << "rightStickBumper: " << cfg_rightStickBumper << std::endl;
+        cfgFile << "watch0: " << cfg_watch0 << std::endl;
+        cfgFile << "watch1: " << cfg_watch1 << std::endl;
+        cfgFile << "watch2: " << cfg_watch2 << std::endl;
         cfgFile.close();
     }
     else
@@ -577,6 +683,38 @@ void readConfigFile()
         if (cfg_smoothTurnSpeed < 1.0f) cfg_smoothTurnSpeed = 1.0f;
         if (cfg_smoothTurnSpeed > 100.0f) cfg_smoothTurnSpeed = 100.0f;
         svr->cfg_ipdOffset = cfg_ipdOffset;
+
+        //----
+        // load button mappings (scan by key name, robust to missing entries)
+        //----
+        cfgFile.open(g_CONFIG_FILE);
+        if (cfgFile.is_open())
+        {
+            std::string line;
+            while (std::getline(cfgFile, line))
+            {
+                size_t pos = line.find(": ");
+                if (pos == std::string::npos) continue;
+                std::string key = line.substr(0, pos);
+                std::string val = line.substr(pos + 2);
+                if (key == "rightA") cfg_rightA = val;
+                else if (key == "rightB") cfg_rightB = val;
+                else if (key == "leftX") cfg_leftX = val;
+                else if (key == "leftY") cfg_leftY = val;
+                else if (key == "leftStick") cfg_leftStick = val;
+                else if (key == "rightStick") cfg_rightStick = val;
+                else if (key == "rightABumper") cfg_rightABumper = val;
+                else if (key == "rightBBumper") cfg_rightBBumper = val;
+                else if (key == "leftXBumper") cfg_leftXBumper = val;
+                else if (key == "leftYBumper") cfg_leftYBumper = val;
+                else if (key == "leftStickBumper") cfg_leftStickBumper = val;
+                else if (key == "rightStickBumper") cfg_rightStickBumper = val;
+                else if (key == "watch0") cfg_watch0 = val;
+                else if (key == "watch1") cfg_watch1 = val;
+                else if (key == "watch2") cfg_watch2 = val;
+            }
+            cfgFile.close();
+        }
     }
 }
 
@@ -1197,8 +1335,8 @@ void msub_6A2040_post(void* ecx, bool* retVal)
         mem.closeProcess();
 
         isRunningAsAdmin = IsElevated();
-        if (cfg_OSK && isRunningAsAdmin)
-            RunOSKEnable();
+        //if (cfg_OSK)
+        //    RunOSKEnable();
 
         //setActionHandlesGame(&steamInput);
         if (*retVal) { *retVal = setActiveJSON(g_VR_PATH + "actions.json"); }
@@ -1903,8 +2041,8 @@ void(__fastcall msub_4A8720)()
 
         resetPlayerAnimCounter = true;
 
-        if (cfg_OSK && isRunningAsAdmin)
-            RunOSKUpdate();
+        if (cfg_OSK)
+            PollSteamVRKeyboardEvents();
     }
     else
     {
@@ -2549,6 +2687,108 @@ float DiffObjFaceObj(stObjectManager* viewerObj, stObjectManager* targetObj)
     return 0;
 }
 
+BYTE resolveKey(const std::string& name)
+{
+    if (name == "escape") return VK_ESCAPE;
+    if (name == "enter") return VK_RETURN;
+    if (name == "space") return VK_SPACE;
+    if (name == "tab") return VK_TAB;
+    if (name == "backspace") return VK_BACK;
+    if (name.length() == 1)
+    {
+        char c = name[0];
+        if (c >= '0' && c <= '9') return (BYTE)c;
+        if (c >= 'a' && c <= 'z') return (BYTE)(c - 32);
+        if (c >= 'A' && c <= 'Z') return (BYTE)c;
+    }
+    return 0;
+}
+
+void ExecuteAction(const std::string& action, bool pressed)
+{
+    if (action == "none") return;
+
+    if (action == "jump")
+    {
+        if (pressed) jumpOrAscendStart();
+        else jumpOrAscendStop();
+        return;
+    }
+    if (action == "mount")
+    {
+        if (pressed)
+        {
+            int mountCount = *(int*)0xBE8E08;
+            lua_Dismount();
+            if (cfg_flyingMountID > 0 && mountCount > 0)
+                CastSpell(cfg_flyingMountID, 0, 0, 0, 0);
+            else if (cfg_groundMountID > 0 && mountCount > 0)
+                CastSpell(cfg_groundMountID, 0, 0, 0, 0);
+            else if (mountCount > 0)
+            {
+                int randNum = rand() % mountCount;
+                int mountSpell = *(int*)((*(int*)0xBE8E0C) + (randNum * 4));
+                CastSpell(mountSpell, 0, 0, 0, 0);
+            }
+        }
+        return;
+    }
+    if (action == "target_nearest")
+    {
+        if (pressed)
+        {
+            int var[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+            lua_TargetNearestEnemy(var);
+        }
+        return;
+    }
+    if (action == "first_third_person")
+    {
+        if (pressed)
+        {
+            readConfigFile();
+            svr->Recenter();
+            int cam = CGWorldFrame__GetActiveCamera();
+            if (cam && gPlayerObj)
+            {
+                float zoomLevel = *(float*)(cam + 0x118);
+                if (zoomLevel == 0)
+                {
+                    *(float*)(cam + 0x118) = 10;
+                    *(float*)(cam + 0x1E8) = 10;
+                }
+                else
+                {
+                    *(float*)(cam + 0x118) = 0;
+                    *(float*)(cam + 0x1E8) = 0;
+                }
+            }
+        }
+        return;
+    }
+    if (action == "occlusion")
+    {
+        if (pressed) doOcclusion = !doOcclusion;
+        return;
+    }
+    if (action == "keyboard")
+    {
+        if (pressed) ToggleSteamVRKeyboard();
+        return;
+    }
+    if (action == "menu_swap")
+    {
+        if (pressed) isCutActionShown = !isCutActionShown;
+        return;
+    }
+
+    BYTE key = resolveKey(action);
+    if (key)
+    {
+        if (pressed) setKeyDown((unsigned int)key);
+        else setKeyUp((unsigned int)key);
+    }
+}
 
 void RunControllerGame()
 {
@@ -2895,32 +3135,17 @@ void RunControllerGame()
                             CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                         }
 
-                        setKeyDown((unsigned int)'1');
+                        ExecuteAction(cfg_leftStickBumper, true);
                     }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        setKeyUp((unsigned int)'1');
+                        ExecuteAction(cfg_leftStickBumper, false);
                 }
                 else
                 {
-                    int mountCount = *(int*)0xBE8E08;
-                    // Mount / Unmount
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                    {
-                        lua_Dismount();
-                        if (cfg_flyingMountID > 0 && mountCount > 0)
-                            CastSpell(cfg_flyingMountID, 0, 0, 0, 0);
-                    }
+                        ExecuteAction(cfg_leftStick, true);
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                    {
-                        if (cfg_groundMountID > 0 && mountCount > 0)
-                            CastSpell(cfg_groundMountID, 0, 0, 0, 0);
-                        else if (mountCount > 0)
-                        {
-                            int randNum = rand() % mountCount;
-                            int mountSpell = *(int*)((*(int*)0xBE8E0C) + (randNum * 4));
-                            CastSpell(mountSpell, 0, 0, 0, 0);
-                        }
-                    }
+                        ExecuteAction(cfg_leftStick, false);
                 }
             }
         }
@@ -2960,12 +3185,12 @@ void RunControllerGame()
                 if (analogActionData.x > 0.25f && mouseButtonDownL == false)
                 {
                     mouseButtonDownL = true;
-                    if (handWatchAtUI[0]) // occlusion
-                        doOcclusion = !doOcclusion;
-                    else if (handWatchAtUI[1]) // keyboard
-                        showOSK = !showOSK;
-                    else if (handWatchAtUI[2]) // menu swap
-                        isCutActionShown = !isCutActionShown;
+                    if (handWatchAtUI[0])
+                        ExecuteAction(cfg_watch0, true);
+                    else if (handWatchAtUI[1])
+                        ExecuteAction(cfg_watch1, true);
+                    else if (handWatchAtUI[2])
+                        ExecuteAction(cfg_watch2, true);
                     else
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 }
@@ -2982,7 +3207,6 @@ void RunControllerGame()
         {
             if (bumperPressed && gPlayerObj)
             {
-                // Hotbar Button 10
                 if (digitalActionData.bState == true && digitalActionData.bChanged == true)
                 {
                     if (targetObj)
@@ -2994,34 +3218,17 @@ void RunControllerGame()
                         CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                     }
 
-                    setKeyDown((unsigned int)'0');
+                    ExecuteAction(cfg_rightStickBumper, true);
                 }
                 else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                    setKeyUp((unsigned int)'0');
+                    ExecuteAction(cfg_rightStickBumper, false);
             }
             else
             {
-                // Toggle First/Third
                 if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                {
-                    readConfigFile();
-                    //cfg_tID = cfg_groundMountID;
-                    svr->Recenter();
-                    if (camera && gPlayerObj)
-                    {
-                        float zoomLevel = *(float*)(camera + 0x118);
-                        if (zoomLevel == 0)
-                        {
-                            *(float*)(camera + 0x118) = 10;
-                            *(float*)(camera + 0x1E8) = 10;
-                        }
-                        else
-                        {
-                            *(float*)(camera + 0x118) = 0;
-                            *(float*)(camera + 0x1E8) = 0;
-                        }
-                    }
-                }
+                    ExecuteAction(cfg_rightStick, true);
+                else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
+                    ExecuteAction(cfg_rightStick, false);
             }
         }
 
@@ -3031,7 +3238,6 @@ void RunControllerGame()
             {
                 if (bumperPressed)
                 {
-                    // Hotbar Button 9
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
                     {
                         if (targetObj)
@@ -3043,18 +3249,17 @@ void RunControllerGame()
                             CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                         }
 
-                        setKeyDown((unsigned int)'9');
+                        ExecuteAction(cfg_rightABumper, true);
                     }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        setKeyUp((unsigned int)'9');
+                        ExecuteAction(cfg_rightABumper, false);
                 }
                 else
                 {
-                    // Jump
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                        jumpOrAscendStart();
+                        ExecuteAction(cfg_rightA, true);
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        jumpOrAscendStop();
+                        ExecuteAction(cfg_rightA, false);
                 }
             }
         }
@@ -3065,7 +3270,6 @@ void RunControllerGame()
             {
                 if (bumperPressed)
                 {
-                    // Hotbar Button 8
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
                     {
                         if (targetObj)
@@ -3077,16 +3281,17 @@ void RunControllerGame()
                             CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                         }
 
-                        setKeyDown((unsigned int)'8');
+                        ExecuteAction(cfg_rightBBumper, true);
                     }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        setKeyUp((unsigned int)'8');
+                        ExecuteAction(cfg_rightBBumper, false);
                 }
                 else
                 {
-                    int var[] = { 0, 0, 0, 0, 0, 0, 0, 0 };
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                        lua_TargetNearestEnemy(var);
+                        ExecuteAction(cfg_rightB, true);
+                    else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
+                        ExecuteAction(cfg_rightB, false);
                 }
             }
         }
@@ -3097,7 +3302,6 @@ void RunControllerGame()
             {
                 if (bumperPressed)
                 {
-                    // Hotbar Button 2
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
                     {
                         if (targetObj)
@@ -3108,18 +3312,17 @@ void RunControllerGame()
                             CGInputControl__UnsetControlBit(inputControl, 0x100, eventTick, 0);
                             CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                         }
-                        setKeyDown((unsigned int)'2');
+                        ExecuteAction(cfg_leftXBumper, true);
                     }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        setKeyUp((unsigned int)'2');
+                        ExecuteAction(cfg_leftXBumper, false);
                 }
                 else
                 {
-                    // Map
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                        setKeyDown((unsigned int)'M');
+                        ExecuteAction(cfg_leftX, true);
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                        setKeyUp((unsigned int)'M');
+                        ExecuteAction(cfg_leftX, false);
                 }
             }
         }
@@ -3128,7 +3331,6 @@ void RunControllerGame()
         {
             if (bumperPressed && gPlayerObj)
             {
-                // Hotbar Button 3
                 if (digitalActionData.bState == true && digitalActionData.bChanged == true)
                 {
                     if (targetObj)
@@ -3140,18 +3342,17 @@ void RunControllerGame()
                         CGInputControl__UpdatePlayer(inputControl, eventTick, 1);
                     }
 
-                    setKeyDown((unsigned int)'3');
+                    ExecuteAction(cfg_leftYBumper, true);
                 }
                 else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                    setKeyUp((unsigned int)'3');
+                    ExecuteAction(cfg_leftYBumper, false);
             }
             else
             {
-                // Escape
                 if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                    setKeyDown((unsigned int)VK_ESCAPE);
+                    ExecuteAction(cfg_leftY, true);
                 else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                    setKeyUp((unsigned int)VK_ESCAPE);
+                    ExecuteAction(cfg_leftY, false);
             }
         }
 
