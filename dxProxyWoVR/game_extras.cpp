@@ -1480,7 +1480,6 @@ void(__thiscall* sub_606F90)(void*, int, int) = (void(__thiscall*)(void*, int, i
 void(__fastcall msub_606F90)(void* ecx, void* edx, int a, int b)
 {
     sub_606F90(ecx, a, b);
-    fnUpdateCameraHMD((int)ecx);
 }
 
 // Slows animation value (frame timing?)
@@ -2051,6 +2050,10 @@ void(__fastcall msub_4A8720)()
 
         RunControllerGame();
         sub_4A8720();
+
+        int camAfter = CGWorldFrame__GetActiveCamera();
+        if (camAfter && gPlayerObj)
+            fnUpdateCameraHMD(camAfter);
 
         resetPlayerAnimCounter = true;
 
