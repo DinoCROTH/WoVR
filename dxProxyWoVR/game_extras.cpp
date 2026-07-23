@@ -19,31 +19,30 @@ float Deg2Rad = M_PI / 180.0f;
 const std::string g_VR_PATH = "./vr/";
 const std::string g_CONFIG_FILE = g_VR_PATH + "config.txt";
 
-stDX11 devDX11;
-int curEye = 0;
-IDirect3DDevice9* devDX9 = nullptr;
-int textureIndex = 0;
-//simpleXR* sxr = new simpleXR(true);
-simpleVR* svr = new simpleVR(false);
+stDX11 devDX11;                              // DX11 device for texture sharing between DX9 and OpenVR
+int curEye = 0;                              // Current render pass: 0=left eye, 1=right eye, 2=UI
+IDirect3DDevice9* devDX9 = nullptr;          // Wrapped DX9 device proxy
+int textureIndex = 0;                        // Ring buffer index (0-3) for double/triple buffering VR frames
+simpleVR* svr = new simpleVR(false);         // OpenVR session manager — handles poses, compositor submit, overlays
 
 stMonitorLayout monitors;
 stScreenLayout screenLayout = stScreenLayout();
-POINT hmdBufferSize = { 0, 0 };
-POINT uiBufferSize = { 0, 0 };
+POINT hmdBufferSize = { 0, 0 };             // Per-eye render resolution from SteamVR
+POINT uiBufferSize = { 0, 0 };              // UI texture resolution (typically 1920x500 for cutup)
 
+// Ring buffers for left/right eye and UI render targets (DX11 textures shared with OpenVR)
 stBasicTexture BackBuffer11[8] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
 stBasicTexture DepthBuffer11[8] = { stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture(), stBasicTexture() };
 
+// DX9 versions of the same buffers (used for rendering, copied to DX11 for OpenVR submit)
 stBasicTexture9 BackBuffer[8] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
 stBasicTexture9 DepthBuffer[8] = { stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9(), stBasicTexture9() };
 
-//stBasicTexture9 mainRenderBuffer = stBasicTexture9();
-//stBasicTexture9 mainDepthBuffer = stBasicTexture9();
-
-stBasicTexture9 uiRender = stBasicTexture9();
-stBasicTexture9 uiRenderMask = stBasicTexture9();
-stBasicTexture9 uiDepth = stBasicTexture9();
-stBasicTexture9 cursor = stBasicTexture9();
+// UI render textures — WoW renders its entire UI into uiRender, which is then cut up into panels
+stBasicTexture9 uiRender = stBasicTexture9();       // Full UI texture (1920x500)
+stBasicTexture9 uiRenderMask = stBasicTexture9();   // Downscaled mask for UI occlusion (1/4 res)
+stBasicTexture9 uiDepth = stBasicTexture9();        // UI depth buffer for occlusion
+stBasicTexture9 cursor = stBasicTexture9();         // 2D cursor sprite sheet
 
 struct RayTarget
 {
@@ -63,58 +62,51 @@ bool showOSK = true;
 bool oldOSK = true;
 bool isRunningAsAdmin = false;
 
-bool steamVRKeyboardOpen = false;
-std::string steamVRKeyboardBuffer;
-bool defaultCutupResolution = false;
-bool isPossessing = false;
+bool steamVRKeyboardOpen = false;             // Whether SteamVR overlay keyboard is currently visible
+std::string steamVRKeyboardBuffer;            // Accumulated text from SteamVR keyboard input events
+bool defaultCutupResolution = false;          // True if UI texture matches expected 96:25 aspect ratio for cutup
+bool isPossessing = false;                    // True when player is possessing another unit (mind control, vehicle)
 
-stBasicTexture9 handWatchList[] = {
-    stBasicTexture9(), stBasicTexture9(),
-    stBasicTexture9(), stBasicTexture9(),
-    stBasicTexture9(), stBasicTexture9(),
-};
 
-int handWatchCount = (sizeof(handWatchList) / sizeof(stBasicTexture9)) / 2;
-bool handWatchAtUI[3] = {};
 
+// UI viewport layout for login/character select screen (single flat panel)
 enum uiFullLayout
 {
-    loginScreen
+    loginScreen                            // The login/char select UI rendered as one panel
 };
 
+// UI viewport layout for in-game cutup mode (WoW UI sliced into 12 floating panels)
 enum uiCutupLayout
 {
-    onHead,
-    centerScreen,
-    characterScreen,
-    questLog,
-    spellbook,
-    chatbox,
-    topMenu,
-    map,
-    menu,
-    handActionbar,
-    recountOmen,
-    mouseover,
-
-    //rightClickMenu,
-    //pinkSquare,
+    onHead,                                //头顶 UI (buffs, etc.) — positioned above player
+    centerScreen,                          // Center UI (action bars, menus) — in front of player
+    characterScreen,                       // Character paper doll — left side
+    questLog,                              // Quest log — right of center
+    spellbook,                             // Spellbook — right of center
+    chatbox,                               // Chat box — above center
+    topMenu,                               // Top micro menu — below center
+    map,                                   // World map — large panel on right
+    menu,                                  // Game menu — below character screen
+    handActionbar,                         // Action bar — attached to left controller
+    recountOmen,                           // Damage meters — attached to left controller
+    mouseover,                             // Tooltip — attached to right controller
 };
 
-int numViewPortsUI = 0;
-int numViewPortsGame = 0;
-std::vector<uiViewport> uiViewUI;
-std::vector<uiViewport> uiViewGame;
-bool doCutUI = true;
-bool isCutActionShown = true;
-bool doOcclusion = true;
-stObjectManager* gPlayerObj = nullptr;
+int numViewPortsUI = 0;                     // Number of UI viewports in login/char select mode
+int numViewPortsGame = 0;                   // Number of UI viewports in in-game mode
+std::vector<uiViewport> uiViewUI;           // Viewport list for login/char select (when gPlayerObj == nullptr)
+std::vector<uiViewport> uiViewGame;         // Viewport list for in-game (when gPlayerObj != nullptr)
+bool doCutUI = true;                        // True = use cutup panel mode; false = use curved UI fallback
+bool isCutActionShown = true;               // Toggle for showing/hiding action bar panels
+bool doOcclusion = true;                    // Toggle for UI occlusion masking (UI hides world behind it)
+stObjectManager* gPlayerObj = nullptr;      // Current active player object — nullptr on login/char select
 
-float gRotation = 0;
-float gCamRotation = 0;
-float vRotationOffset = 0;
-float hRotationStickOffset = 0;
-float maxRadRot = 2 * M_PI;
+// Rotation state — accumulated per-frame, applied in setHorizontalRotation/setVerticalRotation
+float gRotation = 0;                        // Accumulated yaw rotation (radians) from stick input + HMD onward
+float gCamRotation = 0;                     // Camera yaw offset — follows gRotation when strafing
+float vRotationOffset = 0;                  // Per-frame vertical rotation delta from right stick (applied then zeroed)
+float hRotationStickOffset = 0;             // Persistent heading offset from left stick (non-strafe mode only)
+float maxRadRot = 2 * M_PI;                // Max camera rotation range (full 360 degrees)
 bool resetPlayerAnimCounter = false;
 DWORD origBackBuffer = 0;
 DWORD origDepthBuffer = 0;
@@ -139,30 +131,36 @@ RenderObject cursorWorld = nullptr;
 RenderObject rayLine = nullptr;
 RenderObject oskUI = nullptr;
 RenderObject xyzGizmo = nullptr;
-RenderObject handWatchSquare[3] = { nullptr, nullptr, nullptr };
 
 
 
-XMMATRIX matProjection[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
-XMMATRIX matProjectionNeg[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
-XMMATRIX matEyeOffset[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
-XMMATRIX matHMDPos = XMMatrixIdentity();
-XMMATRIX matController[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
-XMMATRIX matControllerPalm[2] = { XMMatrixIdentity(), XMMatrixIdentity() };
-XMMATRIX cameraMatrix = XMMatrixIdentity();
-XMMATRIX cameraMatrixIPD = XMMatrixIdentity();
-XMMATRIX cameraMatrixGame = XMMatrixIdentity();
-XMMATRIX zeroScale = XMMatrixScaling(0.00001f, 0.00001f, 0.00001f);
+
+// VR tracking matrices — updated every frame from OpenVR poses
+XMMATRIX matProjection[2] = { XMMatrixIdentity(), XMMatrixIdentity() };    // Per-eye projection matrices from SteamVR
+XMMATRIX matProjectionNeg[2] = { XMMatrixIdentity(), XMMatrixIdentity() }; // Negated projection (rows 3 inverted) for left-handed DX9
+XMMATRIX matEyeOffset[2] = { XMMatrixIdentity(), XMMatrixIdentity() };     // Per-eye IPD offset (left/right shift from HMD center)
+XMMATRIX matHMDPos = XMMatrixIdentity();                                    // HMD position + orientation in tracking space
+XMMATRIX matController[2] = { XMMatrixIdentity(), XMMatrixIdentity() };     // Controller poses [0]=left, [1]=right
+XMMATRIX matControllerPalm[2] = { XMMatrixIdentity(), XMMatrixIdentity() }; // Controller palm poses (for pitch calculation)
+
+// Camera state matrices
+XMMATRIX cameraMatrix = XMMatrixIdentity();      // Current game camera in DX coordinates (after horizon lock)
+XMMATRIX cameraMatrixIPD = XMMatrixIdentity();   // Final camera = HMD + eye offset + game rotation (written to WoW)
+XMMATRIX cameraMatrixGame = XMMatrixIdentity();  // Camera in WoW game coordinates
+XMMATRIX zeroScale = XMMatrixScaling(0.00001f, 0.00001f, 0.00001f);  // Near-zero scale used to hide head bone
+
+// Coordinate system conversion: DX (X-right, Y-up, Z-forward) <-> WoW game coords
+// Applied as: DxToGame(M) = before * M * after;  GameToDx(M) = after * M * before
 XMMATRIX before = {
-         0, 0,-1, 0,
-        -1, 0, 0, 0,
-         0, 1, 0, 0,
+         0, 0,-1, 0,     // DX Z-axis -> -game X-axis
+        -1, 0, 0, 0,     // DX X-axis -> -game Y-axis
+         0, 1, 0, 0,     // DX Y-axis -> game Z-axis
          0, 0, 0, 1,
 };
 XMMATRIX after = {
-         0,-1, 0, 0,
-         0, 0, 1, 0,
-        -1, 0, 0, 0,
+         0,-1, 0, 0,     // game X-axis -> -DX Y-axis
+         0, 0, 1, 0,     // game Y-axis -> DX Z-axis
+        -1, 0, 0, 0,     // game Z-axis -> -DX X-axis
          0, 0, 0, 1,
 };
 //----
@@ -201,9 +199,7 @@ std::string cfg_leftXBumper = "2";
 std::string cfg_leftYBumper = "3";
 std::string cfg_leftStickBumper = "1";
 std::string cfg_rightStickBumper = "0";
-std::string cfg_watch0 = "occlusion";
-std::string cfg_watch1 = "keyboard";
-std::string cfg_watch2 = "menu_swap";
+
 
 inputController input = {}; //{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
 
@@ -415,6 +411,11 @@ void RunOSKDisable()
     oskRenderCount = -1;
 }
 
+// Toggle the SteamVR overlay keyboard (Quest-style floating keyboard in VR).
+// When opening: sends Enter key to open WoW's chat box, then shows the SteamVR keyboard overlay.
+// When closing: hides the keyboard overlay.
+// The keyboard is modal — input goes through PollSteamVRKeyboardEvents() which reads
+// VREvent_KeyboardCharInput events and injects them via keybd_event().
 void ToggleSteamVRKeyboard()
 {
     vr::IVROverlay* overlay = vr::VROverlay();
@@ -442,6 +443,11 @@ void ToggleSteamVRKeyboard()
     }
 }
 
+// Poll SteamVR overlay keyboard events and inject typed characters into WoW.
+// Called each frame from msub_4A8720 when the keyboard is open.
+// Reads VREvent_KeyboardCharInput (individual characters) and VREvent_KeyboardDone (Enter pressed).
+// Characters are injected via keybd_event() — the same mechanism Windows uses for physical keyboard input.
+// Backspace and Enter are handled as virtual key codes; printable characters use VkKeyScanA.
 void PollSteamVRKeyboardEvents()
 {
     if (!steamVRKeyboardOpen) return;
@@ -522,8 +528,11 @@ void PollSteamVRKeyboardEvents()
     }
 }
 
-int cfg_tID = 0;
+int cfg_tID = 0;  // Current tooltip texture ID (for mouseover UI element)
 
+// Write all current config values to vr/config.txt.
+// Called on first launch (when config doesn't exist) or when settings change.
+// Format is simple "key: value" lines, one per setting.
 void writeConfigFile()
 {
     std::ofstream cfgFile(g_CONFIG_FILE);
@@ -561,9 +570,7 @@ void writeConfigFile()
         cfgFile << "leftYBumper: " << cfg_leftYBumper << std::endl;
         cfgFile << "leftStickBumper: " << cfg_leftStickBumper << std::endl;
         cfgFile << "rightStickBumper: " << cfg_rightStickBumper << std::endl;
-        cfgFile << "watch0: " << cfg_watch0 << std::endl;
-        cfgFile << "watch1: " << cfg_watch1 << std::endl;
-        cfgFile << "watch2: " << cfg_watch2 << std::endl;
+
         cfgFile.close();
     }
     else
@@ -572,6 +579,20 @@ void writeConfigFile()
     }
 }
 
+// Read vr/config.txt and populate all cfg_* global variables.
+// Creates default config if file doesn't exist.
+// Parses each line as "key: value" — extracts the substring after ": " and converts to the
+// appropriate type (int/float/bool/std::string).
+//
+// Config categories:
+//   - Rotation: snapRotateX/Y, snapRotateAmountX/Y, smoothTurnSpeed, hmdOnward
+//   - UI layout: uiOffsetScale, uiOffsetZ/Y/D, uiMultiplier, gameMultiplier
+//   - Gameplay: flyingMountID, groundMountID, strafeMode, showBodyFPS, disableControllers
+//   - Display: disableDesktopMirror, ipdOffset, OSK (SteamVR keyboard)
+//   - Button mappings (all use resolveKey for keyboard key names):
+//     rightA/B, leftX/Y, leftStick/rightStick primary actions
+//     rightABumper/BBumper, leftXBumper/YBumper, leftStickBumper/rightStickBumper secondary actions
+//     watch0/1/2 — hand watch button actions
 void readConfigFile()
 {
     //----
@@ -709,9 +730,6 @@ void readConfigFile()
                 else if (key == "leftYBumper") cfg_leftYBumper = val;
                 else if (key == "leftStickBumper") cfg_leftStickBumper = val;
                 else if (key == "rightStickBumper") cfg_rightStickBumper = val;
-                else if (key == "watch0") cfg_watch0 = val;
-                else if (key == "watch1") cfg_watch1 = val;
-                else if (key == "watch2") cfg_watch2 = val;
             }
             cfgFile.close();
         }
@@ -770,35 +788,10 @@ void CreateTextures(ID3D11Device* devDX11, IDirect3DDevice9* devDX9, POINT textu
     std::string cursorPath = g_VR_PATH + "images/cursors.png";
     if (!cursor.CreateFromFile(devDX9, false, false, false, cursorPath.c_str()))
         logError << cursor.GetErrors();
-
-    //----
-    // Watch on back of hand
-    //----
-    std::string imgFilePaths[] = {
-            g_VR_PATH + "images/occlusion_off.png",   g_VR_PATH + "images/occlusion_on.png",
-            g_VR_PATH + "images/keyboard_off.png",    g_VR_PATH + "images/keyboard_on.png",
-            g_VR_PATH + "images/swapgroup_off.png",   g_VR_PATH + "images/swapgroup_on.png",
-    };
-
-    for (int i = 0; i < (handWatchCount * 2); i++)
-    {
-        struct stat buffer;
-        std::string fullPath = imgFilePaths[i];
-        if (stat(fullPath.c_str(), &buffer) == 0)
-        {
-            if (!handWatchList[i].CreateFromFile(devDX9, false, true, false, fullPath.c_str()))
-                logError << handWatchList[i].GetErrors() << std::endl;
-        }
-        else
-            logError << "Image not found " << fullPath << std::endl;
-    }
 }
 
 void DestroyTextures()
 {
-    for (int i = 0; i < (handWatchCount * 2); i++)
-        handWatchList[i].Release();
-
     cursor.Release();
 
     uiDepth.Release();
@@ -944,15 +937,6 @@ bool CreateBuffers(IDirect3DDevice9* devDX9, POINT textureSizeUI)
         numViewPortsGame = setViewPorts(devDX9, textureSizeUI.x, textureSizeUI.y, &uiViewGame, 1);
     }
 
-    //----
-    // Back of hand squares
-    //----
-    for (int i = 0; i < handWatchCount; i++)
-    {
-        handWatchSquare[i] = RenderSquare(devDX9);
-        handWatchSquare[i].SetShadersLayout(vsTexture.Layout, vsTexture.VS, psTexture.PS);
-    }
-
     return true;
 }
 
@@ -966,23 +950,26 @@ void DestroyBuffers()
     rayLine.Release();
     oskUI.Release();
     xyzGizmo.Release();
-
-    for (int i = 0; i < handWatchCount; i++)
-        handWatchSquare[i].Release();
 }
 
 
 
+// Convert a 4x4 matrix from DirectX coordinate space to WoW game coordinate space.
+// WoW uses a different axis convention than DirectX (different handedness + axis rotation).
 XMMATRIX DxToGame(XMMATRIX matrix)
 {
     return ((before * matrix) * after);
 }
 
+// Convert a 4x4 matrix from WoW game coordinate space to DirectX coordinate space.
 XMMATRIX GameToDx(XMMATRIX matrix)
 {
     return ((after * matrix) * before);
 }
 
+// Read the WoW camera matrix from game memory.
+// WoW stores the camera as 3x3 rotation at cam+0x14..0x34 and position at cam+0x08..0x10.
+// If convert=true, the result is transformed from game coords to DX coords.
 XMMATRIX GetGameCamera(int camAddress, bool convert = false)
 {
     if (camAddress)
@@ -1017,6 +1004,9 @@ XMMATRIX GetGameCamera(int camAddress, bool convert = false)
         return XMMatrixIdentity();
 }
 
+// Write a 4x4 matrix back to the WoW camera struct in game memory.
+// Position goes to cam+0x08..0x10, rotation rows go to cam+0x14..0x34.
+// If convert=true, the matrix is converted from DX coords to game coords before writing.
 void SetGameCamera(int camAddress, XMMATRIX camMatrix, bool convert = false)
 {
     if (camAddress)
@@ -1040,6 +1030,9 @@ void SetGameCamera(int camAddress, XMMATRIX camMatrix, bool convert = false)
     }
 }
 
+// Apply the per-frame vertical rotation offset from the right stick to the camera pitch.
+// Called from the freelook camera hook (msub_5FF530). Writes to cam+0x120 (pitch offset),
+// then zeros vRotationOffset so it's only applied once.
 void fnUpdateCameraController(int camAddress)
 {
     if (camAddress)
@@ -1052,6 +1045,19 @@ void fnUpdateCameraController(int camAddress)
     }
 }
 
+// Core VR camera function — combines the WoW game camera with HMD head tracking.
+// Called once per frame from msub_4A8720 (after freelook hook has finished).
+//
+// Pipeline:
+//   1. Read WoW camera matrix from game memory (rotation + position)
+//   2. Convert to DX coordinate space
+//   3. Horizon-lock: remove pitch from the game camera so VR head tracking controls pitch
+//   4. Combine: finalCamera = EyeOffset * HMDPos * GameCameraRotation
+//   5. Write back to WoW camera memory
+//
+// The horizon lock ensures that when you physically look up/down in VR, the game camera
+// doesn't fight you with its own pitch. The game camera only provides yaw (rotation around
+// the vertical axis) and position, while HMD tracking provides full orientation.
 void fnUpdateCameraHMD(int camAddress)
 {
     if (camAddress)
@@ -1077,6 +1083,14 @@ void fnUpdateCameraHMD(int camAddress)
 }
 
 
+// Called after WoW's animation system positions the character model each frame.
+// In first person (zoomLevel == 0):
+//   1. Hides the head bone by scaling it to near-zero — prevents the camera from being
+//      inside the character's head mesh (which would block the view).
+//   2. If showBodyFPS is enabled, offsets the character's visual position (characterMatrix)
+//      by the HMD tracking offset so the body follows your head movement in VR.
+//      The HMD translation is converted from DX tracking space to game coords via the
+//      axis mapping: game_x = -hmdZ, game_y = -hmdX, game_z = hmdY.
 void UpdateCharacterAnimation_post(stObjectManager* playerObj)
 {
     int cameraAddress = CGWorldFrame__GetActiveCamera();
@@ -1141,7 +1155,11 @@ int IntersectGround(RayTarget* rayTarget)
     return 0;
 }
 
-// Mouse to world ray caluclations
+// Mouse-to-world ray calculation hook — computes a ray from the controller (or HMD if
+// controllers disabled) into the game world for UI panel intersection testing.
+// Uses the right controller's forward vector, transforms by cameraMatrixGame to get
+// WoW game-space origin and endpoint (1000 units forward). Results are stored in
+// the two Vector3* output params and used by the UI ray intersection system.
 void (*sub_4BF0F0)(float, float, Vector3*, Vector3*) = (void (*)(float, float, Vector3*, Vector3*))0x004BF0F0;
 void (msub_4BF0F0)(float a, float b, Vector3* c, Vector3* d)
 {
@@ -1167,14 +1185,19 @@ void (msub_4BF0F0)(float a, float b, Vector3* c, Vector3* d)
     d->z = end.vector4_f32[2];
 }
 
-// SetClientMouseResetPoint
+// Mouse reset point hook — centers the cursor after camera rotation.
+// Called by WoW when it wants to recenter the mouse for mouselook.
+// Passes through to original function unchanged.
 void (*sub_869DB0)() = (void(*)())0x00869DB0;
 void (msub_869DB0)()
 {
     sub_869DB0();
 }
 
-// Calculate Window Size
+// Window size calculation hook — overrides WoW's window dimensions with VR buffer sizes.
+// After the original function runs, resets the window rect to (0,0) + original dimensions
+// to prevent WoW from resizing the window to the desktop resolution.
+// Also updates screenLayout.width/height to match the new window size.
 void (*sub_684D70)(int, int, int) = (void (*)(int, int, int))0x00684D70;
 void (msub_684D70)(int a, int b, int c)
 {
@@ -1239,7 +1262,12 @@ void(msub_6A08D0_post)(void* ecx)
     //if (doLog) logError << "CreateWindow Post : " << *(float*)((int)ecx + 0x16C) << " : " << *(float*)((int)ecx + 0x170) << std::endl;
 }
 
-// Create Window
+// Create Window hooks — intercept WoW's window creation to apply VR-specific changes.
+// Both CreateWindowA (sub_68EBB0) and CreateWindowExA (sub_6A08D0) are hooked.
+// Pre-hook (msub_6A08D0_pre): saves original window dimensions, overrides WS_POPUP style,
+//   forces window size to HMD buffer dimensions, disables window activation.
+// Post-hook (msub_6A08D0_post): removes border/title bar, repositions window to (0,0),
+//   applies final size. This creates a borderless fullscreen window matching VR resolution.
 void(__thiscall* sub_68EBB0)(void*, int) = (void(__thiscall*)(void*, int))0x0068EBB0;
 void(__fastcall msub_68EBB0)(void* ecx, void* edx, int a)
 {
@@ -1248,7 +1276,7 @@ void(__fastcall msub_68EBB0)(void* ecx, void* edx, int a)
     msub_6A08D0_post(ecx);
 }
 
-void(__thiscall* sub_6A08D0)(void*, int) = (void(__thiscall*)(void*, int))0x006A08D0; // Ex
+void(__thiscall* sub_6A08D0)(void*, int) = (void(__thiscall*)(void*, int))0x006A08D0; // CreateWindowExA variant
 void(__fastcall msub_6A08D0)(void* ecx, void* edx, int a)
 {
     msub_6A08D0_pre();
@@ -1257,8 +1285,18 @@ void(__fastcall msub_6A08D0)(void* ecx, void* edx, int a)
 }
 
 //----
-// Create DX Device
-//----
+// DX Device Creation hooks — intercept Direct3D device creation/initialization.
+// These hooks set up the entire VR rendering infrastructure when WoW creates its D3D device.
+//
+// Pre-hook (msub_6A2040_pre): reads WoW's requested window size, detects cutup resolution
+//   (1824×475 is the default WoW UI texture dimensions), scales to primary monitor size.
+//
+// Post-hook (msub_6A2040_post): starts the VR session (svr->StartVR()), captures the DX9 device,
+//   reads config.txt, copies addon UI files, saves original back/depth buffers, creates VR render
+//   targets (left/right eye back buffers, depth buffers, UI render target, occlusion buffers),
+//   creates hand watch icon textures, loads cursor/cursorMask textures.
+//
+// This is where most VR resources are allocated — it runs once at game startup.
 void msub_6A2040_pre(int a)
 {
     //if (doLog) logError << "-- Create DX Device" << std::endl;
@@ -1400,6 +1438,14 @@ void msub_6A1F40_post()
     //if (doLog) logError << "-- Close DX Device" << std::endl;
 }
 
+// DX Device Cleanup hooks — intercept Direct3D device release/destruction.
+// These hooks tear down VR resources when WoW releases its D3D device.
+//
+// Pre-hook (msub_6A1F40_pre): destroys all VR buffers and shaders, releases DX11 device,
+//   stops the VR session. This is the cleanup counterpart to msub_6A2040_post.
+//
+// Both Release (sub_6903B0) and ReleaseEx (sub_6A1F40) are hooked to cover all device
+// destruction paths.
 void(__thiscall* sub_6903B0)(void*) = (void(__thiscall*)(void*))0x006903B0;
 void(__fastcall msub_6903B0)(void* ecx, void* edx)
 {
@@ -1408,7 +1454,7 @@ void(__fastcall msub_6903B0)(void* ecx, void* edx)
     msub_6A1F40_post();
 }
 
-void(__thiscall* sub_6A1F40)(void*) = (void(__thiscall*)(void*))0x006A1F40; // Ex
+void(__thiscall* sub_6A1F40)(void*) = (void(__thiscall*)(void*))0x006A1F40; // ReleaseEx variant
 void(__fastcall msub_6A1F40)(void* ecx, void* edx)
 {
     msub_6A1F40_pre();
@@ -1416,21 +1462,26 @@ void(__fastcall msub_6A1F40)(void* ecx, void* edx)
     msub_6A1F40_post();
 }
 
-// Begin SceneSetup
+// Begin SceneSetup hook — fires at the start of WoW's scene rendering setup.
+// Currently just passes through to the original function.
 void(__thiscall* sub_6A73E0)(void*) = (void(__thiscall*)(void*))0x006A73E0;
 void(__fastcall msub_6A73E0)(void* ecx, void* edx)
 {
     sub_6A73E0(ecx);
 }
 
-// End SceneSetup
+// End SceneSetup hook — fires after WoW finishes scene rendering setup.
+// Currently just passes through to the original function.
 void(__thiscall* sub_6A7540)(void*) = (void(__thiscall*)(void*))0x006A7540;
 void(__fastcall msub_6A7540)(void* ecx, void* edx)
 {
     sub_6A7540(ecx);
 }
 
-// Present Scene
+// Present Scene hook — fires when WoW presents the rendered frame to the screen.
+// This is the final step in WoW's rendering pipeline (after all rendering is done).
+// Currently just passes through to the original function — the VR rendering happens
+// in msub_495410 (Start Render) and msub_4A8720 (OnPaint) instead.
 void(__thiscall* sub_6A7610)(void*) = (void(__thiscall*)(void*))0x006A7610;
 void(__fastcall msub_6A7610)(void* ecx, void* edx)
 {
@@ -1448,7 +1499,11 @@ void(__fastcall msub_6A7610)(void* ecx, void* edx)
 
 
 
-// Should Render Char
+// Should Render Char — hooks WoW's character visibility check.
+// Controls whether the player model is rendered based on:
+//   - zoomLevel == 0 (first person) + showBodyFPS == false → hide body
+//   - Otherwise → show body
+// The head bone is always hidden in first person via UpdateCharacterAnimation_post.
 void(__thiscall* sub_6E0840)(void*, int, int, int) = (void(__thiscall*)(void*, int, int, int))0x006E0840;
 void(__fastcall msub_6E0840)(void* ecx_, void* edx_, int a, int b, int c)
 {
@@ -1467,7 +1522,9 @@ void(__fastcall msub_6E0840)(void* ecx_, void* edx_, int a, int b, int c)
     sub_6E0840(ecx_, a, b, c);
 }
 
-// Update Freelook Camera
+// Freelook camera hook — fires when WoW updates the freelook camera.
+// Applies the per-frame vertical rotation offset from the right stick, then lets
+// the original freelook function run (which reads cam+0x120 for pitch).
 void(__thiscall* sub_5FF530)(void*) = (void(__thiscall*)(void*))0x005FF530;
 void(__fastcall msub_5FF530)(void* ecx, void* edx)
 {
@@ -1475,14 +1532,21 @@ void(__fastcall msub_5FF530)(void* ecx, void* edx)
     sub_5FF530(ecx);
 }
 
-// Update Camera Fn
+// Camera update hook — fires when WoW updates the camera each frame.
+// After the original camera update runs, applies HMD head tracking via fnUpdateCameraHMD.
+// This ensures the game camera includes VR head tracking before the rest of the frame uses it.
 void(__thiscall* sub_606F90)(void*, int, int) = (void(__thiscall*)(void*, int, int))0x00606F90;
 void(__fastcall msub_606F90)(void* ecx, void* edx, int a, int b)
 {
     sub_606F90(ecx, a, b);
+
+    int camAddress = CGWorldFrame__GetActiveCamera();
+    if (camAddress && gPlayerObj)
+        fnUpdateCameraHMD(camAddress);
 }
 
-// Slows animation value (frame timing?)
+// Animation speed hook — halves the animation tick rate.
+// This slows down character animations to make them feel more natural in VR.
 void (*sub_77EFF0)(int, float) = (void (*)(int, float))0x0077EFF0;
 void (msub_77EFF0)(int a, float b)
 {
@@ -1490,7 +1554,9 @@ void (msub_77EFF0)(int a, float b)
     sub_77EFF0(a, b);
 }
 
-// Dynamic model animations
+// Dynamic model animations hook — fires after WoW animates each model.
+// If the animated model is the player character, calls UpdateCharacterAnimation_post
+// to hide the head bone in first person and apply HMD offset to the body.
 void(__thiscall* sub_82F0F0)(void*, int, int, int, int, int) = (void(__thiscall*)(void*, int, int, int, int, int))0x0082F0F0;
 void(__fastcall msub_82F0F0)(void* ecx, void* edx, int a, int b, int c, int d, int e)
 {
@@ -1500,7 +1566,11 @@ void(__fastcall msub_82F0F0)(void* ecx, void* edx, int a, int b, int c, int d, i
         UpdateCharacterAnimation_post(gPlayerObj);
 }
 
-// Update Model Proj
+// Model projection hook — overrides WoW's projection matrix with VR per-eye projection.
+// After the original function runs, replaces the projection matrix at DX9 constant address
+// with the VR stereo projection (matProjectionNeg[curEye]) for the current eye.
+// Only applies when _31 of the matrix is 0 (first-time setup, not already overridden).
+// The _43 field (far clip) is preserved from WoW's original value.
 void(__thiscall* sub_6A9B40)(void*, int) = (void(__thiscall*)(void*, int))0x006A9B40;
 void(__fastcall msub_6A9B40)(void* ecx, void* edx, int a)
 {
@@ -1526,21 +1596,43 @@ void(__fastcall msub_6A9B40)(void* ecx, void* edx, int a)
     }
 }
 
-// Render Mouse
+// Mouse rendering hook — controls whether WoW renders the cursor.
+// In VR mode, the cursor is rendered as a textured quad (cursorWorld/cursorUI)
+// at the intersection point, not as a standard Windows cursor.
+// Passes through to original function unchanged.
 void(__thiscall* sub_687A90)(void*) = (void(__thiscall*)(void*))0x00687A90;
 void(__fastcall msub_687A90)(void* ecx, void* edx)
 {
     sub_687A90(ecx);
 }
 
-// StartUI
+// UI initialization hook — fires when WoW initializes its UI system.
+// Currently just passes through to the original function.
 void(__thiscall* sub_494F30)(int) = (void(__thiscall*)(int))0x00494F30;
 void(__fastcall msub_494F30)(void* ecx, void* edx)
 {
     sub_494F30((int)ecx);
 }
 
-// Start Render
+// Main VR render loop hook — fires at the start of WoW's rendering pipeline (msub_495410).
+// This is the core VR frame function that:
+//   1. Waits for and retrieves new VR poses from SteamVR
+//   2. Updates all tracking matrices (HMD, controllers, projection, IPD)
+//   3. Renders the 3D scene to left eye, right eye, and UI render targets
+//   4. Composites everything into the final frame via stereo quad rendering
+//
+// The render loop has two code paths:
+//   - Full UI mode (login/char select): UI rendered as a single curved panel in front of the player
+//   - Cutup mode (in-game): WoW's UI sliced into 12 floating panels attached to various positions
+//
+// For each eye (j=0 left, j=1 right, j=2 UI):
+//   - Sets render target and depth buffer from bufferList
+//   - Calls WoW's render functions to draw the 3D scene or UI
+//   - Applies stereo projection + eye offset for 3D frames
+//   - Sets viewport dimensions to HMD buffer size (3D) or UI buffer size (UI)
+//
+// After all 3 frames, composites into final output quad with per-eye projection matrices.
+// When occlusion is active, UI panels are rendered to a separate mask to hide world geometry behind them.
 void (*sub_4BEE60)(float*, float*, int, int) = (void (*)(float*, float*, int, int))0x004BEE60;
 void(__thiscall* sub_494EE0)(int, int) = (void(__thiscall*)(int, int))0x00494EE0;
 
@@ -1820,9 +1912,6 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
             XMMATRIX oskUITransposed = XMMatrixTranspose(oskUI.GetObjectMatrix());
             XMMATRIX rayLineTransposed = XMMatrixTranspose(rayLine.GetObjectMatrix());
             XMMATRIX cutUITransposed = XMMatrixTranspose(cutUI.GetObjectMatrix());
-            XMMATRIX handWatchTransposed[3];
-            for (int i = 0; i < 3; i++)
-                handWatchTransposed[i] = XMMatrixTranspose(handWatchSquare[i].GetObjectMatrix());
 
             //----
             // Render cursor to to ui windows
@@ -1844,16 +1933,6 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
             result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
             result = devDX9->SetTexture(0, cursor.pTexture);
             cursorUI.Render();
-
-            //----
-            // Icons for back of hand
-            //----
-            IDirect3DTexture9* watchShaderView[] =
-            {
-                handWatchList[0].pTexture, handWatchList[1].pTexture,
-                handWatchList[2].pTexture, handWatchList[3].pTexture,
-                handWatchList[4].pTexture, handWatchList[5].pTexture,
-            };
 
             std::vector<uiViewport>* uiView = &uiViewGame;
             for (int i = 0; i < 2; i++)
@@ -1887,21 +1966,6 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
                 result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
                 result = devDX9->SetTexture(0, oskTexture.pTexture);
                 oskUI.Render();
-
-                //----
-                // Renders back of hand icons
-                //----
-                int watchCount = (doCutUI) ? handWatchCount : handWatchCount - 1;
-                for (int i = 0; i < watchCount; i++)
-                {
-                    int activeOffset = ((handWatchAtUI[i]) ? 1 : 0);
-                    worldMatrix = handWatchTransposed[i];
-                    result = devDX9->SetVertexShaderConstantF(0, &projectionMatrix._11, 4);
-                    result = devDX9->SetVertexShaderConstantF(4, &viewMatrix._11, 4);
-                    result = devDX9->SetVertexShaderConstantF(8, &worldMatrix._11, 4);
-                    result = devDX9->SetTexture(0, watchShaderView[(i * 2) + activeOffset]);
-                    handWatchSquare[i].Render();
-                }
 
                 //----
                 // Renders the ray
@@ -1981,7 +2045,23 @@ void(__fastcall msub_495410)(void* ecx, void* edx)
     }
 }
 
-// OnPrint
+// OnPaint hook — WoW's main per-frame update function. Fires every frame.
+// This is the central orchestrator for all VR logic when in-game.
+//
+// Execution order (when VR enabled):
+//   1. Detect active player (gPlayerObj) and check for possession (mind control/vehicle)
+//   2. Submit previous frame's rendered textures to SteamVR (svr->Render)
+//   3. Update bone lookup table for head bone hiding
+//   4. Detect UI hover state (isOverUI — for cursor vs VR laser)
+//   5. Set near clip to 0.06f (VR requires very close near plane)
+//   6. RunControllerGame() — process all VR controller input, movement, rotation
+//   7. sub_4A8720() — call original WoW OnPaint (renders the 3D scene + UI)
+//   8. fnUpdateCameraHMD() — AFTER OnPaint, apply HMD tracking to camera (prevents stutter
+//      from freelook hook overwriting HMD camera for one frame)
+//   9. PollSteamVRKeyboardEvents() — if SteamVR keyboard is open, inject typed characters
+//
+// When VR is disabled, just passes through to the original OnPaint.
+// gPlayerObj is set to nullptr after each frame (reset for next frame's login/char select detection).
 void(__thiscall* sub_4A8720)() = (void(__thiscall*)())0x004A8720;
 void(__fastcall msub_4A8720)()
 {
@@ -2051,10 +2131,6 @@ void(__fastcall msub_4A8720)()
         RunControllerGame();
         sub_4A8720();
 
-        int camAfter = CGWorldFrame__GetActiveCamera();
-        if (camAfter && gPlayerObj)
-            fnUpdateCameraHMD(camAfter);
-
         resetPlayerAnimCounter = true;
 
         if (cfg_OSK)
@@ -2067,6 +2143,11 @@ void(__fastcall msub_4A8720)()
     gPlayerObj = nullptr;
 }
 
+// Move the Windows cursor to a specific position on screen.
+// In VR mode, the cursor is positioned either:
+//   - By the controller ray (when pointing at a UI panel — mouseX/mouseY from panel intersection)
+//   - By WoW's internal mouse state (when right-click mouselook is active — reads D413EC/D413F0)
+// forceMouse=true bypasses the active window check (used for controller raycasting).
 void SetMousePosition(HWND hwnd, int mouseX, int mouseY, bool forceMouse)
 {
     HWND active = GetActiveWindow();
@@ -2091,6 +2172,14 @@ void SetMousePosition(HWND hwnd, int mouseX, int mouseY, bool forceMouse)
     }
 }
 
+// Update the cursor icon each frame based on WoW's cursor state and VR controller mode.
+// When controllers are active:
+//   - Arrow cursor (ID=1) is hidden (replaced by VR laser pointer)
+//   - Other cursors (resize, loot sparkle, etc.) are kept as-is
+// When controllers are disabled (cfg_disableControllers):
+//   - Normal arrow is mapped to resize cursor (28) for visibility
+//   - Resize cursor is mapped to arrow (1)
+// Loads cursor texture from WoW's cursor resource and renders it as a textured quad.
 void RunFrameUpdateSetCursor()
 {
     float aspect = (float)screenLayout.width / (float)screenLayout.height;
@@ -2377,33 +2466,6 @@ void RunFrameUpdateController()
 
     intersectList.push_back({ &oskUI, &oskAtUI, oskLayout, emptyIntersections, emptyInteraction, 1, true, true, false });
 
-    //----
-    // Back of hand squares
-    //----
-    static const XMMATRIX rotateX = XMMatrixRotationX(180.f * Deg2Rad);
-    static const XMMATRIX rotateY = XMMatrixRotationY(90.f * Deg2Rad);
-    static const XMMATRIX viewportRot = rotateX * rotateY;
-
-    int x = 0;
-    int y = 0;
-    int watchCount = (doCutUI) ? handWatchCount : handWatchCount - 1;
-    for (int i = 0; i < watchCount; i++)
-    {
-        handWatchAtUI[i] = false;
-        XMMATRIX ScaleMatrix = XMMatrixScaling(0.010f, 0.010f, 1.0f);
-        XMMATRIX moveMatrix = XMMatrixTranslation(-0.14f + (x * 2) * 0.010f, 0.06f + (y * 2) * 0.010f, 0.0f);
-        handWatchSquare[i].SetObjectMatrix((ScaleMatrix * moveMatrix) * viewportRot * matController[0]);
-
-        intersectList.push_back({ &handWatchSquare[i], &handWatchAtUI[i], &screenLayout, emptyIntersections, emptyInteraction, 1, true, true, false});
-
-        x++;
-        if (x >= 3)
-        {
-            y++;
-            x = 0;
-        }
-    }
-
     RunFrameUpdateSetCursor();
 
     //XMMATRIX rayMatrix = matController[1];
@@ -2443,7 +2505,7 @@ void RunFrameUpdateController()
                 for (size_t i = 0; i < it.intersection.size(); i++)
                 {
                     bool isOverUIElement = true;
-                    if (oskAtUI || handWatchAtUI[0] || handWatchAtUI[1] || handWatchAtUI[2])
+                    if (oskAtUI)
                     {
                         //isOverUI = false;
                     }
@@ -2522,7 +2584,9 @@ void RunFrameUpdateKeyboard()
     RunFrameUpdateSetCursor();
 }
 
-// Skybox fix? - disable makes skybox work on all viewports but kills water
+// Skybox fix hook — conditionally allows skybox rendering on all viewports.
+// When show=true, calls the original skybox function. Currently disabled (show=false)
+// because enabling it makes skybox work on all viewports but kills water rendering.
 void(__thiscall* sub_6A38D0)(void*) = (void(__thiscall*)(void*))0x006A38D0;
 void(__fastcall msub_6A38D0)(void* ecx, void* edx)
 {
@@ -2532,13 +2596,33 @@ void(__fastcall msub_6A38D0)(void* ecx, void* edx)
     }
 }
 
-// GreyBoxes
+// GreyBox rendering hook — currently disabled (commented out call).
+// This was likely used for debugging/UI element bounding boxes.
 void (*sub_796C10)(int, int, int, int, int) = (void (*)(int, int, int, int, int))0x00796C10;
 void (msub_796C10)(int a, int b, int c, int d, int e)
 {
     //sub_796C10(a, b, c, d, e);
 }
 
+// Install all function hooks via Microsoft Detours library.
+// Hooks are installed in the order they appear in the game's execution flow.
+//
+// Key hooks:
+//   - msub_4BF0F0: Mouse-to-world ray casting (for UI panel pointing)
+//   - msub_869DB0: Mouse reset point (centers cursor after camera rotation)
+//   - msub_684D70: Window size calculation (overrides for VR buffer dimensions)
+//   - msub_68EBB0/6A08D0: Window creation (forces VR buffer size, WS_POPUP style)
+//   - msub_6904D0/6A2040: DX device creation (wraps with VR device for shared textures)
+//   - msub_6903B0/6A1F40: DX device cleanup (deactivates VR session)
+//   - msub_6A73E0/6A7540/6A7610: Scene setup and presentation (VR render loop entry points)
+//   - msub_6E0840: Character visibility check (first-person body hide)
+//   - msub_5FF530: Freelook camera update (vertical rotation offset)
+//   - msub_606F90: Camera update (pass-through, HMD moved to OnPaint)
+//   - msub_77EFF0: Animation speed (halves tick rate for VR comfort)
+//   - msub_82F0F0: Dynamic model animations (head bone hide + HMD body offset)
+//   - msub_687A90: Mouse rendering (pass-through, cursor hidden when pointing at UI)
+//   - msub_495410: Start Render (VR frame setup, pose retrieval, stereo rendering)
+//   - msub_4A8720: OnPaint (VR frame orchestrator, controller input, HMD camera)
 void InitDetours(HANDLE hModule)
 {
     DetourTransactionBegin();
@@ -2578,6 +2662,8 @@ void InitDetours(HANDLE hModule)
 }
 
 
+// Remove all function hooks and restore original WoW functions.
+// Called during DLL unload or when VR is disabled.
 void ExitDetours()
 {
     /*
@@ -2654,6 +2740,9 @@ void (*sitOrDescendStop)() = (void (*)())0x005FC140;
 bool rightStickXCenter = false;
 bool rightStickYCenter = false;
 
+// Set the character's pitch (looking up/down) from VR controller or HMD tracking.
+// Writes directly to the game's objectData->objPitch field.
+// Called from RunControllerGame each frame with the tracked pitch angle.
 void setVerticalRotation(float rotation)
 {
     int camera = CGWorldFrame__GetActiveCamera();
@@ -2661,6 +2750,11 @@ void setVerticalRotation(float rotation)
         gPlayerObj->ptrObjectData->objPitch = rotation;
 }
 
+// Set the character's yaw (facing direction) and camera yaw offset.
+// Two writes happen:
+//   1. CGMovementInfo__SetFacing — tells WoW which direction the character faces (affects movement, combat)
+//   2. cam+0x11C — camera yaw offset that WoW's freelook system reads
+// If mouseHold is true, the camera offset is locked (used when holding right-click to mouselook).
 void setHorizontalRotation(float rotation, float camOffset, bool mouseHold)
 {
     int camera = CGWorldFrame__GetActiveCamera();
@@ -2703,6 +2797,9 @@ float DiffObjFaceObj(stObjectManager* viewerObj, stObjectManager* targetObj)
     return 0;
 }
 
+// Convert a human-readable key name (from config.txt) to a Windows virtual key code.
+// Supports: escape, enter, space, tab, backspace, single digits (0-9), letters (a-z/A-Z).
+// Returns 0 if the name doesn't match any known key.
 BYTE resolveKey(const std::string& name)
 {
     if (name == "escape") return VK_ESCAPE;
@@ -2720,6 +2817,18 @@ BYTE resolveKey(const std::string& name)
     return 0;
 }
 
+// Dispatch a named action from a controller button or watch button press.
+// Actions are configured in vr/config.txt (e.g., "rightA: jump", "leftStick: mount").
+// Built-in actions:
+//   - "none": no-op
+//   - "jump": press/release spacebar (jumpOrAscendStart/Stop)
+//   - "mount": dismount, then cast configured mount spell (flying优先, then ground, then random)
+//   - "target_nearest": call WoW's TargetNearestEnemy function
+//   - "first_third_person": toggle zoom between 0 (first person) and 10 (third person) + recenter VR
+//   - "occlusion": toggle UI occlusion masking
+//   - "keyboard": toggle SteamVR overlay keyboard
+//   - "menu_swap": toggle action bar panel visibility
+// Any other string is treated as a key name and resolved via resolveKey().
 void ExecuteAction(const std::string& action, bool pressed)
 {
     if (action == "none") return;
@@ -2806,6 +2915,21 @@ void ExecuteAction(const std::string& action, bool pressed)
     }
 }
 
+// Main per-frame function for VR controller input processing and game state updates.
+// Called from msub_4A8720 (OnPaint) each frame, BEFORE the original OnPaint runs.
+//
+// Pipeline:
+//   1. Set SteamVR active action set
+//   2. Read all controller poses (HMD, left/right hand, palm)
+//   3. Process left stick input (movement: strafe or analog direction)
+//   4. Process right stick input (rotation: snap or smooth turn, vertical snap/smooth)
+//   5. Process left/right trigger, bumper, A/B buttons
+//   6. Process watch button ray intersections
+//   7. Process trigger pull (mouse click, UI interaction)
+//   8. Update ray intersection list for controller pointing at UI panels
+//   9. Accumulate rotation: gRotation += hRotationOffset + onwardDiff
+//  10. Apply rotation via setHorizontalRotation (writes facing + camera offset)
+//  11. Apply movement via CalculateForwardMovement (WoW engine moves the character)
 void RunControllerGame()
 {
     //----
@@ -2935,59 +3059,17 @@ void RunControllerGame()
                         if (hyp > 0.5f)
                             shouldRun = true;
 
-                        if (cfg_strafeMode)
+                        hRotationStickOffset = std::atan2(analogActionData.x * -1, analogActionData.y);
+                        if (lxRunning == false)
                         {
-                            float dz = 0.2f;
-                            if (std::fabs(analogActionData.y) > std::fabs(analogActionData.x))
-                            {
-                                bool fwd = analogActionData.y > dz;
-                                bool back = analogActionData.y < -dz;
-
-                                if (fwd && !mfRunning) { mfRunning = true; moveForwardStart(); }
-                                else if (!fwd && mfRunning) { mfRunning = false; moveForwardStop(); }
-
-                                if (back && !mbRunning) { mbRunning = true; moveBackwardStart(); }
-                                else if (!back && mbRunning) { mbRunning = false; moveBackwardStop(); }
-
-                                if (mlRunning) { mlRunning = false; moveLeftStop(); }
-                                if (mrRunning) { mrRunning = false; moveRightStop(); }
-                            }
-                            else
-                            {
-                                bool left = analogActionData.x < -dz;
-                                bool right = analogActionData.x > dz;
-
-                                if (left && !mlRunning) { mlRunning = true; moveLeftStart(); }
-                                else if (!left && mlRunning) { mlRunning = false; moveLeftStop(); }
-
-                                if (right && !mrRunning) { mrRunning = true; moveRightStart(); }
-                                else if (!right && mrRunning) { mrRunning = false; moveRightStop(); }
-
-                                if (mfRunning) { mfRunning = false; moveForwardStop(); }
-                                if (mbRunning) { mbRunning = false; moveBackwardStop(); }
-                            }
-                        }
-                        else
-                        {
-                            hRotationStickOffset = std::atan2(analogActionData.x * -1, analogActionData.y);
-                            if (lxRunning == false)
-                            {
-                                lxRunning = true;
-                                moveForwardStart();
-                            }
+                            lxRunning = true;
+                            moveForwardStart();
                         }
 
                     }
                     else if (hyp <= 0.1f)
                     {
-                        if (cfg_strafeMode)
-                        {
-                            if (mfRunning) { mfRunning = false; moveForwardStop(); }
-                            if (mbRunning) { mbRunning = false; moveBackwardStop(); }
-                            if (mlRunning) { mlRunning = false; moveLeftStop(); }
-                            if (mrRunning) { mrRunning = false; moveRightStop(); }
-                        }
-                        else if (lxRunning == true)
+                        if (lxRunning == true)
                         {
                             lxRunning = false;
                             moveForwardStop();
@@ -3201,13 +3283,6 @@ void RunControllerGame()
                 if (analogActionData.x > 0.25f && mouseButtonDownL == false)
                 {
                     mouseButtonDownL = true;
-                    if (handWatchAtUI[0])
-                        ExecuteAction(cfg_watch0, true);
-                    else if (handWatchAtUI[1])
-                        ExecuteAction(cfg_watch1, true);
-                    else if (handWatchAtUI[2])
-                        ExecuteAction(cfg_watch2, true);
-                    else
                         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 }
                 else if (analogActionData.x <= 0.25f && mouseButtonDownL == true)
@@ -3435,9 +3510,9 @@ void RunControllerGame()
             oldOnwardYaw = angles.vector4_f32[1];
         }
 
-        if (cfg_strafeMode && leftStickActive)
+        // Camera yaw follows character facing when stick is active
+        if (leftStickActive)
             gCamRotation = gRotation;
-
 
         if (std::fabs(targetFacing) > 0)
         {
