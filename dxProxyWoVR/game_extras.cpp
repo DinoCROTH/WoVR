@@ -3073,14 +3073,8 @@ void RunControllerGame()
                         {
                             lxRunning = false;
                             moveForwardStop();
-                            hRotationStickOffset = 0;
-                            XMVECTOR releaseAngles;
-                            if ((cfg_hmdOnward & 1) == 1)
-                                releaseAngles = GetAngles(matHMDPos);
-                            else
-                                releaseAngles = GetAngles(matController[0]);
-                            gRotation = EnsureProperRadians(releaseAngles.vector4_f32[1]);
-                            gCamRotation = gRotation;
+                            setKeyDown((unsigned int)'W');
+                            setKeyUp((unsigned int)'W');
                         }
                     }
                 }
