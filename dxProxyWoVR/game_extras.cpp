@@ -3073,13 +3073,8 @@ void RunControllerGame()
                         {
                             lxRunning = false;
                             moveForwardStop();
-                            XMVECTOR releaseAngles;
-                            if ((cfg_hmdOnward & 1) == 1)
-                                releaseAngles = GetAngles(matHMDPos);
-                            else
-                                releaseAngles = GetAngles(matController[0]);
-                            if (gPlayerObj && gPlayerObj->ptrObjectData)
-                                CGMovementInfo__SetFacing((int)gPlayerObj->ptrObjectData, EnsureProperRadians(releaseAngles.vector4_f32[1]));
+                            moveForwardStart();
+                            moveForwardStop();
                         }
                     }
                 }
