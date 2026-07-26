@@ -149,6 +149,13 @@ XMMATRIX cameraMatrixIPD = XMMatrixIdentity();   // Final camera = HMD + eye off
 XMMATRIX cameraMatrixGame = XMMatrixIdentity();  // Camera in WoW game coordinates
 XMMATRIX zeroScale = XMMatrixScaling(0.00001f, 0.00001f, 0.00001f);  // Near-zero scale used to hide head bone
 
+// Quaternion smoothing state for HMD camera
+static XMVECTOR smoothedHMDQuat = XMQuaternionIdentity();
+static bool hmdQuatInitialized = false;
+static bool hmdQPCInitialized = false;
+static LARGE_INTEGER lastHMDTime = {};
+static LARGE_INTEGER hmdQPCFreq = {};
+
 // Coordinate system conversion: DX (X-right, Y-up, Z-forward) <-> WoW game coords
 // Applied as: DxToGame(M) = before * M * after;  GameToDx(M) = after * M * before
 XMMATRIX before = {
@@ -186,19 +193,20 @@ float cfg_smoothTurnSpeed = 25.0f;
 bool cfg_strafeMode = true;
 float cfg_ipdOffset = 0.0f;
 bool cfg_disableDesktopMirror = false;
+float cfg_rotationSmoothing = 0.25f;
 
-std::string cfg_rightA = "jump";
-std::string cfg_rightB = "target_nearest";
-std::string cfg_leftX = "map";
-std::string cfg_leftY = "escape";
-std::string cfg_leftStick = "mount";
-std::string cfg_rightStick = "first_third_person";
-std::string cfg_rightABumper = "9";
-std::string cfg_rightBBumper = "8";
-std::string cfg_leftXBumper = "2";
-std::string cfg_leftYBumper = "3";
-std::string cfg_leftStickBumper = "1";
-std::string cfg_rightStickBumper = "0";
+std::string cfg_rightA = "vr1";
+std::string cfg_rightB = "vr2";
+std::string cfg_leftX = "vr3";
+std::string cfg_leftY = "vr4";
+std::string cfg_leftStick = "vr5";
+std::string cfg_rightStick = "vr6";
+std::string cfg_rightABumper = "vr7";
+std::string cfg_rightBBumper = "vr8";
+std::string cfg_leftXBumper = "vr9";
+std::string cfg_leftYBumper = "vr10";
+std::string cfg_leftStickBumper = "vr11";
+std::string cfg_rightStickBumper = "vr12";
 
 
 inputController input = {}; //{ { 0, 0, 0, 0, 0, 0, 0, 0, 0 } };
@@ -286,6 +294,27 @@ void (*lua_Dismount)() = (void(*)())0x0051D170;
 //void (*lua_TurnOrActionStart)() = (void(*)())0x005FC610;
 //void (*lua_TurnOrActionStop)() = (void(*)())0x005FC680;
 
+// FrameScript__Execute — WoW's internal Lua string executor (3.3.5a build 12340).
+// Signature: __cdecl void FrameScript__Execute(const char* code, const char* source, int zero)
+// source = name shown in error messages (e.g., "InjectedCode"). zero = unused.
+// Address 0x00819210 confirmed from build 12340 offsets dumps.
+void (*FrameScript__Execute)(const char*, const char*, int) = (void(*)(const char*, const char*, int))0x00819210;
+
+// Execute a Lua string in WoW's global FrameScript environment.
+// Safe from render thread — same context as lua_Dismount, lua_TargetNearestEnemy.
+void ExecuteLuaString(const char* code)
+{
+    FrameScript__Execute(code, "WoVR", 0);
+}
+
+// Flash a VRCore touch indicator via Lua. button = "A","B","X","Y","L","R".
+// Calls VRCore_FlashTouch() defined in touch_flash.lua (VRCore addon).
+void FlashTouchIndicator(const char* button)
+{
+    char lua[128];
+    sprintf_s(lua, "if VRCore_FlashTouch then VRCore_FlashTouch('%s') end", button);
+    ExecuteLuaString(lua);
+}
 
 void RunFrameUpdateController();
 void RunFrameUpdateKeyboard();
@@ -558,6 +587,7 @@ void writeConfigFile()
         cfgFile << "strafeMode: " << cfg_strafeMode << std::endl;
         cfgFile << "ipdOffset: " << cfg_ipdOffset << std::endl;
         cfgFile << "disableDesktopMirror: " << cfg_disableDesktopMirror << std::endl;
+        cfgFile << "rotationSmoothing: " << cfg_rotationSmoothing << std::endl;
         cfgFile << "rightA: " << cfg_rightA << std::endl;
         cfgFile << "rightB: " << cfg_rightB << std::endl;
         cfgFile << "leftX: " << cfg_leftX << std::endl;
@@ -623,6 +653,7 @@ void readConfigFile()
     std::string s_cfg_strafeMode = "";
     std::string s_cfg_ipdOffset = "";
     std::string s_cfg_disableDesktopMirror = "";
+    std::string s_cfg_rotationSmoothing = "";
 
     cfgFile.open(g_CONFIG_FILE);
     if (cfgFile.is_open())
@@ -650,6 +681,7 @@ void readConfigFile()
         std::getline(cfgFile, s_cfg_strafeMode);
         std::getline(cfgFile, s_cfg_ipdOffset);
         std::getline(cfgFile, s_cfg_disableDesktopMirror);
+        std::getline(cfgFile, s_cfg_rotationSmoothing);
         cfgFile.close();
 
         //----
@@ -675,6 +707,7 @@ void readConfigFile()
         s_cfg_strafeMode.erase(0, s_cfg_strafeMode.find(": ") + 2);
         s_cfg_ipdOffset.erase(0, s_cfg_ipdOffset.find(": ") + 2);
         s_cfg_disableDesktopMirror.erase(0, s_cfg_disableDesktopMirror.find(": ") + 2);
+        s_cfg_rotationSmoothing.erase(0, s_cfg_rotationSmoothing.find(": ") + 2);
 
         //----
         // set the config options
@@ -699,6 +732,9 @@ void readConfigFile()
         cfg_strafeMode = s_cfg_strafeMode != "0";
         cfg_ipdOffset = std::stof(s_cfg_ipdOffset);
         cfg_disableDesktopMirror = s_cfg_disableDesktopMirror != "0";
+        cfg_rotationSmoothing = std::stof(s_cfg_rotationSmoothing);
+        if (cfg_rotationSmoothing < 0.0f) cfg_rotationSmoothing = 0.0f;
+        if (cfg_rotationSmoothing > 1.0f) cfg_rotationSmoothing = 1.0f;
         if (cfg_uiMultiplier < 0.1) cfg_uiMultiplier = 0.1;
         if (cfg_gameMultiplier < 0.1) cfg_gameMultiplier = 0.1;
         if (cfg_smoothTurnSpeed < 1.0f) cfg_smoothTurnSpeed = 1.0f;
@@ -1070,12 +1106,58 @@ void fnUpdateCameraHMD(int camAddress)
         cameraMatrix = horizonLockMatirx * cameraMatrix;
         cameraMatrixGame = DxToGame(cameraMatrix);
 
-        cameraMatrixIPD = XMMatrixIdentity();
-        if (curEye == 0 || curEye == 1)
-            cameraMatrixIPD = matEyeOffset[curEye] * matHMDPos;
-        else
-            cameraMatrixIPD = matHMDPos;
-        cameraMatrixIPD *= cameraMatrix;
+        // --- Quaternion smoothing for HMD rotation ---
+        XMMATRIX smoothedHMD = matHMDPos;
+
+        if (cfg_rotationSmoothing > 0.0f)
+        {
+            // Initialize QPC frequency once
+            if (!hmdQPCInitialized)
+            {
+                QueryPerformanceFrequency(&hmdQPCFreq);
+                hmdQPCInitialized = true;
+            }
+
+            // Delta time
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            float deltaTime = (float)(now.QuadPart - lastHMDTime.QuadPart) / (float)hmdQPCFreq.QuadPart;
+            lastHMDTime = now;
+
+            // Extract raw HMD rotation quaternion
+            XMVECTOR targetQuat = XMQuaternionRotationMatrix(matHMDPos);
+            targetQuat = XMQuaternionNormalize(targetQuat);
+
+            // Hemisphere correction: avoid slerp spinning the long way around
+            if (XMVectorGetX(XMQuaternionDot(smoothedHMDQuat, targetQuat)) < 0)
+                targetQuat = XMVectorNegate(targetQuat);
+
+            // First frame: snap to target
+            if (!hmdQuatInitialized)
+            {
+                smoothedHMDQuat = targetQuat;
+                hmdQuatInitialized = true;
+            }
+
+            // Deadzone: ignore tiny sensor noise when standing still
+            float angle = XMScalarACos(XMVectorGetX(XMQuaternionDot(smoothedHMDQuat, targetQuat)));
+            if (angle < 0.001f)
+                targetQuat = smoothedHMDQuat;
+
+            // Delta-time based smoothing (frame-rate independent)
+            float alpha = 1.0f - expf(-deltaTime * 20.0f * cfg_rotationSmoothing);
+
+            // Slerp and normalize
+            smoothedHMDQuat = XMQuaternionSlerp(smoothedHMDQuat, targetQuat, alpha);
+            smoothedHMDQuat = XMQuaternionNormalize(smoothedHMDQuat);
+
+            // Rebuild matrix: smoothed rotation + raw position
+            smoothedHMD = XMMatrixRotationQuaternion(smoothedHMDQuat);
+            smoothedHMD.r[3] = XMVectorSetW(matHMDPos.r[3], 1.0f);
+        }
+
+        // Build final camera
+        cameraMatrixIPD = matEyeOffset[curEye] * smoothedHMD * cameraMatrix;
 
         SetGameCamera(camAddress, cameraMatrixIPD, true);
         *(float*)(camAddress + 0x40) = maxRadRot;
@@ -2807,6 +2889,18 @@ BYTE resolveKey(const std::string& name)
     if (name == "space") return VK_SPACE;
     if (name == "tab") return VK_TAB;
     if (name == "backspace") return VK_BACK;
+    // F1-F12: "f1" through "f12"
+    if (name.length() >= 2 && name.length() <= 3 &&
+        (name[0] == 'f' || name[0] == 'F'))
+    {
+        int num = 0;
+        for (size_t i = 1; i < name.length(); i++)
+        {
+            if (name[i] >= '0' && name[i] <= '9') num = num * 10 + (name[i] - '0');
+            else return 0;
+        }
+        if (num >= 1 && num <= 12) return (BYTE)(0x70 + num - 1); // VK_F1=0x70..VK_F12=0x7B
+    }
     if (name.length() == 1)
     {
         char c = name[0];
@@ -2832,6 +2926,23 @@ BYTE resolveKey(const std::string& name)
 void ExecuteAction(const std::string& action, bool pressed)
 {
     if (action == "none") return;
+
+    // VR action bar: press number key to trigger WoW's native action bar
+    // vr1→A=4, vr2→B=1, vr3→X=2, vr4→Y=3, vr5→R=0, vr6→L=9,
+    // vr7→A+=6, vr8→B+=5, vr9→X+=7, vr10→Y+=8
+    if (action.size() > 2 && action[0] == 'v' && action[1] == 'r')
+    {
+        int slot = 0;
+        try { slot = std::stoi(action.substr(2)); } catch (...) {}
+        static const int vrToKey[] = { '4','1','2','3','0','9','6','5','7','8' };
+        if (slot >= 1 && slot <= 10)
+        {
+            int key = vrToKey[slot - 1];
+            if (pressed) setKeyDown((unsigned int)key);
+            else setKeyUp((unsigned int)key);
+        }
+        return;
+    }
 
     if (action == "jump")
     {
@@ -3241,7 +3352,9 @@ void RunControllerGame()
                 else
                 {
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                    {
                         ExecuteAction(cfg_leftStick, true);
+                    }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                         ExecuteAction(cfg_leftStick, false);
                 }
@@ -3316,10 +3429,12 @@ void RunControllerGame()
             }
             else
             {
-                if (digitalActionData.bState == true && digitalActionData.bChanged == true)
-                    ExecuteAction(cfg_rightStick, true);
-                else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
-                    ExecuteAction(cfg_rightStick, false);
+                    if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                    {
+                        ExecuteAction(cfg_rightStick, true);
+                    }
+                    else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
+                        ExecuteAction(cfg_rightStick, false);
             }
         }
 
@@ -3348,7 +3463,9 @@ void RunControllerGame()
                 else
                 {
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                    {
                         ExecuteAction(cfg_rightA, true);
+                    }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                         ExecuteAction(cfg_rightA, false);
                 }
@@ -3380,7 +3497,9 @@ void RunControllerGame()
                 else
                 {
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                    {
                         ExecuteAction(cfg_rightB, true);
+                    }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                         ExecuteAction(cfg_rightB, false);
                 }
@@ -3411,7 +3530,9 @@ void RunControllerGame()
                 else
                 {
                     if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                    {
                         ExecuteAction(cfg_leftX, true);
+                    }
                     else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                         ExecuteAction(cfg_leftX, false);
                 }
@@ -3441,7 +3562,9 @@ void RunControllerGame()
             else
             {
                 if (digitalActionData.bState == true && digitalActionData.bChanged == true)
+                {
                     ExecuteAction(cfg_leftY, true);
+                }
                 else if (digitalActionData.bState == false && digitalActionData.bChanged == true)
                     ExecuteAction(cfg_leftY, false);
             }
